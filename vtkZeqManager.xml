@@ -1,0 +1,21 @@
+<ServerManagerConfiguration>
+
+  <!-- ================================================================ -->
+  <!-- ZeqManager                                                       -->
+  <!-- ================================================================ -->
+
+  <ProxyGroup name="zeq_helpers">
+
+    <!-- 
+    <ZeqManagerProxy name="ZeqManagerProxy" class="vtkSMZeqManagerProxy">
+    </ZeqManagerProxy>
+    -->
+
+    <Proxy name="ZeqManager" class="vtkZeqManager">
+      <Property name="Refresh"
+                command="Refresh">
+      </Property>
+    </Proxy>
+
+  </ProxyGroup>
+</ServerManagerConfiguration>
