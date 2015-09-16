@@ -229,8 +229,9 @@ void vtkZeqManager::Discover()
 void vtkZeqManager::onHBPCamera( const zeq::Event& event )
 {
   //std::cout << "Got a onHBPCamera event" << std::endl;
-  const zeq::uint128_t notification = event.getType();
-  this->ZeqManagerInternals->NotificationSocket->Send(&notification, sizeof(notification));
+  event_data data = {event.getType(), event.getSize() };
+  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
 }
 
 //---------------------------------------------------------------------------
@@ -249,9 +250,9 @@ void vtkZeqManager::onRequest( const zeq::Event& event )
 void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 {
   //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
-  const zeq::uint128_t notification = event.getType();
-  this->ZeqManagerInternals->NotificationSocket->Send(&notification, sizeof(notification));
-
+  event_data data = {event.getType(), event.getSize() };
+  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
 }
 //---------------------------------------------------------------------------
 void vtkZeqManager::Start()
@@ -265,14 +266,14 @@ void vtkZeqManager::Start()
 //----------------------------------------------------------------------------
 void* vtkZeqManager::NotificationThread()
 {
-  const zeq::uint128_t notification = zeq::make_uint128("zeq::hbp::NewConnection");
+  event_data data = {zeq::make_uint128("zeq::hbp::NewConnection"), 0 };
 
   this->ZeqManagerInternals->SignalNotifThreadCreated();
   //
-  this->ZeqManagerInternals->NotificationSocket->Send(&notification, sizeof(notification));
-
+  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  //
   int FAIL_FAIL = 0;
-  while (!this->abort_poll && this->WaitForUnlock(&notification) != FAIL_FAIL) {
+  while (!this->abort_poll && this->WaitForUnlock(NULL) != FAIL_FAIL) {
 
     // poll for 100ms, if nothing try again.
     // we do it like this so that we can exit more cleanly than setting timeout to zero

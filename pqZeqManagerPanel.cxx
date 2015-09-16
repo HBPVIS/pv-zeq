@@ -64,6 +64,9 @@
 //
 #include "vtkZeqManager.h"
 #include <zeq/vocabulary.h>
+//
+#include <vector>
+//
 //----------------------------------------------------------------------------
 class StringList : public QStringListModel
 {
@@ -184,58 +187,72 @@ void pqZeqManagerPanel::onStart()
 void pqZeqManagerPanel::onNotified()
 {
   int error = 0;
-  int bytes = -1;
-  zeq::uint128_t notificationCode;
+  qint64 bytes_read = 0;
+  //
   const zeq::uint128_t new_connection = zeq::make_uint128("zeq::hbp::NewConnection");
   //
   std::stringstream temp;
   //
+  vtkZeqManager::event_data event_data;
+  //
   while (this->Internals->TcpNotificationSocket->size() > 0) {
-    bytes = this->Internals->TcpNotificationSocket->read(
-      reinterpret_cast<char*>(&notificationCode), sizeof(notificationCode));
-    if (bytes != sizeof(notificationCode)) {
-      error = 1;
-      std::cerr << "Error when reading from notification socket" << std::endl;
-      return;
-    }
     temp << this->Internals->event_num++ << " : ";
-    if (notificationCode == new_connection) {
+    // read event block
+    bytes_read = this->Internals->TcpNotificationSocket->read(
+      reinterpret_cast<char*>(&event_data), sizeof(vtkZeqManager::event_data));
+    if (bytes_read != sizeof(vtkZeqManager::event_data)) {
+      error = 1;
+      temp << "read " << bytes_read << " bytes of data";
+      break;
+    }
+    // read data for event itself
+    std::vector<char> buffer;
+    if (event_data.Size>0) {
+      buffer.reserve(event_data.Size);
+      bytes_read = this->Internals->TcpNotificationSocket->read(
+        reinterpret_cast<char*>(&buffer[0]), event_data.Size);
+      if (bytes_read!=event_data.Size) {
+        temp << "Error in data size";
+        continue;
+      }
+    }
+    // process the event
+    if (event_data.Type == new_connection) {
       temp << "New Zeq connection";
       this->Internals->eventview->setModel(&this->Internals->listModel);
     }
     // if (this->Internals->DsmProxyCreated() && this->Internals->DsmInitialized) {
-    else if (notificationCode == zeq::hbp::EVENT_CAMERA) {
+    else if (event_data.Type == zeq::hbp::EVENT_CAMERA) {
       temp << "New Camera";
-      //emit this->UpdateData();
+        //emit this->UpdateData();
     }
-    else if (notificationCode == zeq::hbp::EVENT_SELECTEDIDS) {
+    else if (event_data.Type == zeq::hbp::EVENT_SELECTEDIDS) {
       temp << "New Selected Ids";
       //this->UpdateInformation();
     }
-    /*
-     case zeq::hbp::EVENT_CAMERA:
-     std::cout << "\"NONE : ignoring unlock \"...";
-     break;
-     case zeq::hbp::EVENT_CAMERA:
-     std::cout << "\"Wait\"...";
-     this->onPause();
-     this->Internals->PauseRequested = false;
-     emit this->UpdateStatus("paused");
-     break;
-     */
+      /*
+       case zeq::hbp::EVENT_CAMERA:
+       std::cout << "\"NONE : ignoring unlock \"...";
+       break;
+       case zeq::hbp::EVENT_CAMERA:
+       std::cout << "\"Wait\"...";
+       this->onPause();
+       this->Internals->PauseRequested = false;
+       emit this->UpdateStatus("paused");
+       break;
+       */
     else {
       error = 1;
-      temp << "Unrecognized/Unsupported event " << notificationCode;
+      temp << "Unrecognized/Unsupported event " << event_data.Type;
     }
     this->Internals->listModel << temp.str().c_str();
     this->Internals->eventview->scrollToBottom();
 
     if (!error) std::cout << "Updated" << std::endl;
-    // TODO steered objects are not updated for now
-    // this->Internals->DsmProxy->InvokeCommand("UpdateSteeredObjects");
+      // TODO steered objects are not updated for now
+      // this->Internals->DsmProxy->InvokeCommand("UpdateSteeredObjects");
 
     // signal back to the server that we have done with this event and it can proceed with the next
     this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
-
   }
 }

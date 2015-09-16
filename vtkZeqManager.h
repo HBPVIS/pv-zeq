@@ -44,6 +44,11 @@ public:
   vtkZeqManagerInternals *ZeqManagerInternals;
   //ETX
 
+  struct event_data {
+    zeq::uint128_t Type;
+    size_t         Size;
+  };
+
   static vtkZeqManager *New();
   vtkTypeMacro(vtkZeqManager,vtkObject);
 
