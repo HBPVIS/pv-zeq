@@ -56,42 +56,75 @@
 #include "pqPropertyManager.h"
 #include "pqNamedWidgets.h"
 //
+#include <QTcpServer>
+#include <QTcpSocket>
+#include <QStringListModel>
+//
 #include "ui_pqZeqManagerPanel.h"
+//
+#include "vtkZeqManager.h"
+#include <zeq/vocabulary.h>
+//----------------------------------------------------------------------------
+class StringList : public QStringListModel
+{
+public:
+  void append (const QString& string){
+    insertRows(rowCount(), 1);
+    setData(index(rowCount()-1), string);
+  }
+  StringList& operator<<(const QString& string){
+    append(string);
+    return *this;
+  }
+};
+
 //----------------------------------------------------------------------------
 //
 //----------------------------------------------------------------------------
-class pqZeqManagerPanel::pqUI : public QObject, public Ui::ZeqManagerPanel
+class pqZeqManagerPanel::pqInternals : public QObject, public Ui::ZeqManagerPanel
 {
 public:
-  pqUI(pqZeqManagerPanel* p) : QObject(p)
+  pqInternals(pqZeqManagerPanel* p) : QObject(p)
   {
     this->Links = new pqPropertyLinks;
+    event_num = 0;
   }
   //
-  ~pqUI() {
+  ~pqInternals() {
     delete this->Links;
   }
   //
-  pqPropertyLinks            *Links;
+  pqPropertyLinks         *Links;
+  QTcpServer*              TcpNotificationServer;
+  QTcpSocket*              TcpNotificationSocket;
+  StringList               listModel;
+  static int               event_num;
 };
 //----------------------------------------------------------------------------
-//
+int pqZeqManagerPanel::pqInternals::event_num = 0;
+//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
   pqNamedObjectPanel(proxy, p) 
 {
-  this->UI = new pqUI(this);
-  this->UI->setupUi(this);
+  this->Internals = new pqInternals(this);
+  this->Internals->setupUi(this);
 
   // inherited from pqNamedObjectPanel
   this->linkServerManagerProperties();
   
-  this->connect(this->UI->refresh,
-    SIGNAL(clicked()), this, SLOT(onRefresh()));
+  this->connect(this->Internals->start,
+    SIGNAL(clicked()), this, SLOT(onStart()));
 
   //
   this->connect(this, SIGNAL(onaccept()), this, SLOT(onAccept()));
 
+  // Create a new notification socket to sned events from server to client
+  this->Internals->TcpNotificationServer = new QTcpServer(this);
+  this->connect(this->Internals->TcpNotificationServer,
+    SIGNAL(newConnection()), SLOT(onNewNotificationSocket()));
+  this->Internals->TcpNotificationServer->listen(QHostAddress::Any,
+    VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT);
 }
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::~pqZeqManagerPanel()
@@ -103,22 +136,10 @@ void pqZeqManagerPanel::LoadSettings()
   pqSettings *settings = pqApplicationCore::instance()->settings();
   settings->beginGroup("ZeqManager");
   /*
-  // InterpolationMethod
-  this->UI->InterpolationMethod->setCurrentIndex(settings->value("InterpolationMethod", 0).toInt());
   // KernelType
   this->UI->KernelType->setCurrentIndex(settings->value("KernelType", 0).toInt());
-  // KernelDimension
-  this->UI->KernelDimension->setCurrentIndex(settings->value("KernelDimension", 0).toInt());
   // HCoefficient
   this->UI->HCoefficient->setText(settings->value("HCoefficient", 1.5).toString());
-  // DefaultDensity
-  this->UI->DefaultDensity->setText(settings->value("DefaultDensity", 1000.0).toString());
-  // DefaultParticleSideLength
-  this->UI->DefaultParticleSideLength->setText(settings->value("DefaultParticleSideLength", 0.18333).toString());
-  // Max Neighbours
-  this->UI->MaximumNeighbours->setText(settings->value("MaximumNeighbours", 64).toString()); 
-  // MaxSearchRadius
-  this->UI->MaximumSearchRadius->setText(settings->value("MaximumSearchRadius", 0.0).toString());
   */
   settings->endGroup();
 }
@@ -128,33 +149,93 @@ void pqZeqManagerPanel::SaveSettings()
   pqSettings *settings = pqApplicationCore::instance()->settings();
   settings->beginGroup("ZeqManager");
   /*
-  // InterpolationMethod
-  settings->setValue("InterpolationMethod", this->UI->InterpolationMethod->currentIndex());
   // KernelType
   settings->setValue("KernelType", this->UI->KernelType->currentIndex());
-  // KernelDimension
-  settings->setValue("KernelDimension", this->UI->KernelDimension->currentIndex());
   // HCoefficient
   settings->setValue("HCoefficient", this->UI->HCoefficient->text());
-  // DefaultDensity
-  settings->setValue("DefaultDensity", this->UI->DefaultDensity->text());
-  // DefaultParticleSideLength
-  settings->setValue("DefaultParticleSideLength", this->UI->DefaultParticleSideLength->text());
-  // Max Neighbours
-  settings->setValue("MaximumNeighbours", this->UI->MaximumNeighbours->text());
-  // MaxSearchRadius
-  settings->setValue("MaximumSearchRadius", this->UI->MaximumSearchRadius->text());
   */
   settings->endGroup();
 }
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onNewNotificationSocket()
+{
+  this->Internals->TcpNotificationSocket =
+  this->Internals->TcpNotificationServer->nextPendingConnection();
+
+  if (this->Internals->TcpNotificationSocket) {
+    this->connect(this->Internals->TcpNotificationSocket,
+                  SIGNAL(readyRead()), SLOT(onNotified()), Qt::QueuedConnection);
+    this->Internals->TcpNotificationServer->close();
+  }
+}
+
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onAccept()
 {
 }
 //-----------------------------------------------------------------------------
-void pqZeqManagerPanel::onRefresh()
+void pqZeqManagerPanel::onStart()
 {
-    this->referenceProxy()->getProxy()->InvokeCommand("Refresh");
+    this->referenceProxy()->getProxy()->InvokeCommand("Start");
 }
-//----------------------------------------------------------------------------
 
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onNotified()
+{
+  int error = 0;
+  int bytes = -1;
+  zeq::uint128_t notificationCode;
+  const zeq::uint128_t new_connection = zeq::make_uint128("zeq::hbp::NewConnection");
+  //
+  std::stringstream temp;
+  //
+  while (this->Internals->TcpNotificationSocket->size() > 0) {
+    bytes = this->Internals->TcpNotificationSocket->read(
+      reinterpret_cast<char*>(&notificationCode), sizeof(notificationCode));
+    if (bytes != sizeof(notificationCode)) {
+      error = 1;
+      std::cerr << "Error when reading from notification socket" << std::endl;
+      return;
+    }
+    temp << this->Internals->event_num++ << " : ";
+    if (notificationCode == new_connection) {
+      temp << "New Zeq connection";
+      this->Internals->eventview->setModel(&this->Internals->listModel);
+    }
+    // if (this->Internals->DsmProxyCreated() && this->Internals->DsmInitialized) {
+    else if (notificationCode == zeq::hbp::EVENT_CAMERA) {
+      temp << "New Camera";
+      //emit this->UpdateData();
+    }
+    else if (notificationCode == zeq::hbp::EVENT_SELECTEDIDS) {
+      temp << "New Selected Ids";
+      //this->UpdateInformation();
+    }
+    /*
+     case zeq::hbp::EVENT_CAMERA:
+     std::cout << "\"NONE : ignoring unlock \"...";
+     break;
+     case zeq::hbp::EVENT_CAMERA:
+     std::cout << "\"Wait\"...";
+     this->onPause();
+     this->Internals->PauseRequested = false;
+     emit this->UpdateStatus("paused");
+     break;
+     */
+    else {
+      error = 1;
+      temp << "Unrecognized/Unsupported event " << notificationCode;
+    }
+    this->Internals->listModel << temp.str().c_str();
+    this->Internals->eventview->scrollToBottom();
+
+    if (!error) std::cout << "Updated" << std::endl;
+    // TODO steered objects are not updated for now
+    // this->Internals->DsmProxy->InvokeCommand("UpdateSteeredObjects");
+
+    // signal back to the server that we have done with this event and it can proceed with the next
+    this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
+
+  }
+}

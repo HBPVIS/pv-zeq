@@ -18,12 +18,14 @@ public:
 
 private slots:
   void onAccept();
-  void onRefresh();
+  void onStart();
+  void onNewNotificationSocket();
+  void onNotified();
 
 protected:
 
-  class pqUI;
-  pqUI* UI;
+  class pqInternals;
+  pqInternals* Internals;
 
 protected slots:
 

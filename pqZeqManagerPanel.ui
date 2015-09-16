@@ -26,18 +26,27 @@
       <bool>true</bool>
      </property>
      <layout class="QVBoxLayout" name="verticalLayout_2">
-      <property name="margin">
+      <property name="leftMargin">
+       <number>2</number>
+      </property>
+      <property name="topMargin">
+       <number>2</number>
+      </property>
+      <property name="rightMargin">
+       <number>2</number>
+      </property>
+      <property name="bottomMargin">
        <number>2</number>
       </property>
       <item>
-       <widget class="QPushButton" name="refresh">
+       <widget class="QPushButton" name="start">
         <property name="text">
-         <string>Refresh browser</string>
+         <string>Start Zeq</string>
         </property>
        </widget>
       </item>
       <item>
-       <widget class="QListView" name="listView"/>
+       <widget class="QListView" name="eventview"/>
       </item>
      </layout>
     </widget>

@@ -12,8 +12,11 @@
     -->
 
     <Proxy name="ZeqManager" class="vtkZeqManager">
-      <Property name="Refresh"
-                command="Refresh">
+      <Property name="Start"
+        command="Start">
+      </Property>
+      <Property name="SignalUpdated"
+        command="SignalUpdated">
       </Property>
     </Proxy>
 

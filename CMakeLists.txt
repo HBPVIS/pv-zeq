@@ -53,6 +53,25 @@ ELSE (ParaView_SOURCE_DIR)
   INCLUDE(${PARAVIEW_USE_FILE})
 ENDIF (ParaView_SOURCE_DIR)
 
+#------------------------------------------------------------------------------
+# Boost
+#------------------------------------------------------------------------------
+set(Boost_ADDITIONAL_VERSIONS
+  ${Boost_ADDITIONAL_VERSIONS}
+  "1.59.0" "1.59"
+  "1.58.0" "1.58"
+  "1.57.0" "1.57")
+
+find_package(Boost
+  1.55
+  REQUIRED
+  COMPONENTS
+  regex date_time serialization
+  program_options filesystem log log_setup system thread
+)
+
+include_directories(${Boost_INCLUDE_DIRS})
+
 #--------------------------------------------------
 # Set project include directories 
 #--------------------------------------------------
@@ -99,25 +118,43 @@ ENDIF(WIN32)
 # Setup GUI custom Qt panel sources and wrapping
 #--------------------------------------------------
 IF(PARAVIEW_BUILD_QT_GUI)
+  if (PARAVIEW_QT_VERSION VERSION_GREATER "4")
+    set (Qt5_FIND_COMPONENTS Widgets)
+    include (ParaViewQt5)
+    
+    QT5_WRAP_CPP(
+      ZEQ_MOC_SRCS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerDockWindow.h
+    )
+    
+    QT5_WRAP_UI(
+      ZEQ_UI_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.ui
+    )
+    
+  else ()
+    include (${QT_USE_FILE})
+    
+    #--------------------------------------------------
+    # make sure all *.ui dialogs/etc are wrapped
+    #--------------------------------------------------
+    QT4_WRAP_UI(
+      ZEQ_UI_SOURCES
+      ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.ui
+    )
 
-  #--------------------------------------------------
-  # make sure all *.ui dialogs/etc are wrapped
-  #--------------------------------------------------
-  QT4_WRAP_UI(
-    ZEQ_UI_SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.ui
-  )
-
-  #--------------------------------------------------
-  # make sure all *.h files for ui are wrapped by moc
-  #--------------------------------------------------
-  QT4_WRAP_CPP(
-    ZEQ_MOC_SRCS 
-      ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.h
-      ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerDockWindow.h
-  )
+    #--------------------------------------------------
+    # make sure all *.h files for ui are wrapped by moc
+    #--------------------------------------------------
+    QT4_WRAP_CPP(
+      ZEQ_MOC_SRCS 
+        ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerPanel.h
+        ${CMAKE_CURRENT_SOURCE_DIR}/pqZeqManagerDockWindow.h
+    )
+  endif()
   
- #--------------------------------------------------
+  #--------------------------------------------------
   # invoke macro that adds our SPH manager panel
   #--------------------------------------------------
   ADD_PARAVIEW_OBJECT_PANEL(
