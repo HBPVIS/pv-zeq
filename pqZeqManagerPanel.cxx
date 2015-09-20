@@ -30,6 +30,8 @@
 #include "vtkSMRepresentationProxy.h"
 #include "vtkSMPropertyHelper.h"
 #include "vtkProcessModule.h"
+#include "vtkClientServerStream.h"
+#include "vtkSMSession.h"
 
 // ParaView includes
 #include "pqActiveObjects.h"
@@ -196,6 +198,7 @@ void pqZeqManagerPanel::onNotified()
   vtkZeqManager::event_data event_data;
   //
   while (this->Internals->TcpNotificationSocket->size() > 0) {
+    std::cout << "bytes available " << this->Internals->TcpNotificationSocket->bytesAvailable() << std::endl;
     temp << this->Internals->event_num++ << " : ";
     // read event block
     bytes_read = this->Internals->TcpNotificationSocket->read(
@@ -205,16 +208,18 @@ void pqZeqManagerPanel::onNotified()
       temp << "read " << bytes_read << " bytes of data";
       break;
     }
-    // read data for event itself
+
+    // read the remainder of the event data
     std::vector<char> buffer;
-    if (event_data.Size>0) {
-      buffer.reserve(event_data.Size);
-      bytes_read = this->Internals->TcpNotificationSocket->read(
-        reinterpret_cast<char*>(&buffer[0]), event_data.Size);
-      if (bytes_read!=event_data.Size) {
-        temp << "Error in data size";
-        continue;
-      }
+    if (event_data.Type == new_connection ||
+        event_data.Type == zeq::hbp::EVENT_CAMERA ||
+        event_data.Type == zeq::hbp::EVENT_SELECTEDIDS)
+    {
+      std::cout << "Get a recognized message type " << std::endl;
+    }
+    else {
+      error = 1;
+      temp << "Unrecognized/Unsupported event " << event_data.Type;
     }
     // process the event
     if (event_data.Type == new_connection) {
@@ -227,32 +232,85 @@ void pqZeqManagerPanel::onNotified()
         //emit this->UpdateData();
     }
     else if (event_data.Type == zeq::hbp::EVENT_SELECTEDIDS) {
-      temp << "New Selected Ids";
-      //this->UpdateInformation();
-    }
-      /*
-       case zeq::hbp::EVENT_CAMERA:
-       std::cout << "\"NONE : ignoring unlock \"...";
-       break;
-       case zeq::hbp::EVENT_CAMERA:
-       std::cout << "\"Wait\"...";
-       this->onPause();
-       this->Internals->PauseRequested = false;
-       emit this->UpdateStatus("paused");
-       break;
-       */
-    else {
-      error = 1;
-      temp << "Unrecognized/Unsupported event " << event_data.Type;
+      temp << "New Selected Ids : size ";
+      temp << event_data.Size;
+      if (event_data.Size>0) {
+        std::cout << "Event data being read " << event_data.Size*sizeof(int) << std::endl;
+        buffer.resize(event_data.Size*sizeof(int));
+        bytes_read = this->Internals->TcpNotificationSocket->read(
+                       reinterpret_cast<char*>(&buffer[0]), event_data.Size*sizeof(int));
+        if (bytes_read!=event_data.Size*sizeof(int)) {
+          temp << "Error in data size";
+          continue;
+        }
+      }
+      this->UpdateSelection(event_data, &buffer[0]);
     }
     this->Internals->listModel << temp.str().c_str();
     this->Internals->eventview->scrollToBottom();
 
-    if (!error) std::cout << "Updated" << std::endl;
+    if (!error) {
+      // read data for event itself
+      std::cout << "Updated" << std::endl;
+    }
       // TODO steered objects are not updated for now
       // this->Internals->DsmProxy->InvokeCommand("UpdateSteeredObjects");
 
     // signal back to the server that we have done with this event and it can proceed with the next
     this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
   }
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_data, char *data)
+{
+  pqServerManagerModel *sm = pqApplicationCore::instance()->getServerManagerModel();
+  pqPipelineSource *pqsource = sm->findItem<pqPipelineSource*>("BlueConfigcircuitreader1");
+  vtkSMSourceProxy *proxy = NULL;
+  if (pqsource) {
+    this->Internals->listModel << "Found a reader object";
+    this->Internals->eventview->scrollToBottom();
+    proxy = pqsource->getSourceProxy();
+  }
+  if (proxy) {
+    //
+    vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
+    int numValues = event_data.Size;
+    vtkClientServerStream::Array array =
+    {
+      vtkClientServerStream::int32_array,
+      static_cast<vtkTypeUInt32>(numValues),
+      static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
+      (int*)(data)
+    };
+
+    vtkClientServerStream stream;
+    stream << vtkClientServerStream::Invoke
+      << VTKOBJECT(proxy)
+      << "SetSelectedGIds"
+      << numValues
+      << array;
+    stream << vtkClientServerStream::End;
+
+    proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
+  }
+  else {
+    this->Internals->listModel << "No BBP source proxy to set Ids on";
+  }
+
+/*
+  // find the pipeline associated with this source
+  pqPipelineSource* pqsource = pqApplicationCore::instance()->
+  getServerManagerModel()->findItem<pqPipelineSource*>(source);
+  // and find all views it is present in
+  if (pqsource) {
+    foreach (pqView *view, pqsource->getViews()) {
+      pqDataRepresentation *repr = pqsource->getRepresentation(0, view);
+      if (repr && repr->isVisible()) {
+        // add them to the list
+        viewlist.insert(view);
+      }
+    }
+  }
+ */
 }

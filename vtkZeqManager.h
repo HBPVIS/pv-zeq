@@ -27,6 +27,7 @@ typedef boost::shared_ptr< zeq::Subscriber > SubscriberPtr;
 typedef std::vector< SubscriberPtr > Subscribers;
 
 class vtkMultiProcessController;
+#include "vtkUnsignedIntArray.h"
 //BTX
 //ETX
 #define VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT 11112
@@ -75,6 +76,7 @@ public:
   vtkGetStringMacro(HostsDescription);
   vtkSetStringMacro(HostsDescription);
 
+  void SetSelectedGIDs(int maxvalues, unsigned int *values);
 
 protected:
    vtkZeqManager();
@@ -92,9 +94,15 @@ protected:
   std::string       _servicename;
   servus::Servus    _service;
   servus::Strings   _hosts;
-  zeq::Subscriber   _subscriber;
+  zeq::Subscriber  *_subscriber;
 
+  //
+  // Zeq manager variables
+  //
   static vtkZeqManager *ZeqManagerSingleton;
+  // The most recent selection list
+  vtkUnsignedIntArray  *SelectedGIDs;
+
 
   // Description:
   // Wait for a notification - notifications are used to trigger user

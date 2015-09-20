@@ -3,6 +3,7 @@
 
 #include "pqProxy.h"
 #include "pqNamedObjectPanel.h"
+#include "vtkZeqManager.h"
 
 class pqZeqManagerPanel : public pqNamedObjectPanel
 {
@@ -23,6 +24,8 @@ private slots:
   void onNotified();
 
 protected:
+
+  void UpdateSelection(const vtkZeqManager::event_data &event_data, char *data);
 
   class pqInternals;
   pqInternals* Internals;

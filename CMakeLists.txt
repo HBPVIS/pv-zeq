@@ -229,6 +229,7 @@ TARGET_LINK_LIBRARIES(${PLUGIN_NAME}
     vtksys
     Lunchbox
     zeq
+    zeqHBP
 )
 
 #--------------------------------------------------
