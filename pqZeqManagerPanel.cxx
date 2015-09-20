@@ -68,6 +68,7 @@
 #include <zeq/vocabulary.h>
 //
 #include <vector>
+#include <regex>
 //
 //----------------------------------------------------------------------------
 class StringList : public QStringListModel
@@ -265,34 +266,38 @@ void pqZeqManagerPanel::onNotified()
 void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_data, char *data)
 {
   pqServerManagerModel *sm = pqApplicationCore::instance()->getServerManagerModel();
-  pqPipelineSource *pqsource = sm->findItem<pqPipelineSource*>("BlueConfigcircuitreader1");
+  QList<pqPipelineSource*> pqsources = sm->findItems<pqPipelineSource*>(NULL);
   vtkSMSourceProxy *proxy = NULL;
-  if (pqsource) {
-    this->Internals->listModel << "Found a reader object";
-    this->Internals->eventview->scrollToBottom();
-    proxy = pqsource->getSourceProxy();
-  }
-  if (proxy) {
-    //
-    vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
-    int numValues = event_data.Size;
-    vtkClientServerStream::Array array =
-    {
-      vtkClientServerStream::int32_array,
-      static_cast<vtkTypeUInt32>(numValues),
-      static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
-      (int*)(data)
-    };
+  if (pqsources.size()>0) {
+    std::regex bbp("BlueConfig.*");
+    for (QList<pqPipelineSource*>::iterator it = pqsources.begin(); it != pqsources.end(); ++it) {
+      proxy = (*it)->getSourceProxy();
+      if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
+        this->Internals->listModel << "Setting Ids on " + (*it)->getSMName();
+        this->Internals->eventview->scrollToBottom();
 
-    vtkClientServerStream stream;
-    stream << vtkClientServerStream::Invoke
-      << VTKOBJECT(proxy)
-      << "SetSelectedGIds"
-      << numValues
-      << array;
-    stream << vtkClientServerStream::End;
+        //
+        vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
+        int numValues = event_data.Size;
+        vtkClientServerStream::Array array =
+        {
+          vtkClientServerStream::int32_array,
+          static_cast<vtkTypeUInt32>(numValues),
+          static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
+          (int*)(data)
+        };
 
-    proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
+        vtkClientServerStream stream;
+        stream << vtkClientServerStream::Invoke
+          << VTKOBJECT(proxy)
+          << "SetSelectedGIds"
+          << numValues
+          << array;
+        stream << vtkClientServerStream::End;
+
+        proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
+      }
+    }
   }
   else {
     this->Internals->listModel << "No BBP source proxy to set Ids on";
