@@ -296,12 +296,21 @@ void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_d
         stream << vtkClientServerStream::End;
 
         proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
+
+        proxy->Modified();
+        UpdateViews(proxy);
       }
     }
   }
   else {
     this->Internals->listModel << "No BBP source proxy to set Ids on";
   }
+
+  // 
+  // @TODO Find a way to 'accept' all 3D widgets so that we can
+  // trigger the writer with the correct values
+  //
+//  pqActiveObjects::instance().activeView()->forceRender();
 
 /*
   // find the pipeline associated with this source
@@ -318,4 +327,41 @@ void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_d
     }
   }
  */
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<pqView*> &viewlist)
+{
+  // find the pipeline associated with this source
+  pqPipelineSource* pqsource = pqApplicationCore::instance()->
+    getServerManagerModel()->findItem<pqPipelineSource*>(source);
+  // and find all views it is present in
+  if (pqsource) {
+    foreach (pqView *view, pqsource->getViews()) {
+      pqDataRepresentation *repr = pqsource->getRepresentation(0, view);
+      if (repr && repr->isVisible()) {
+        // add them to the list
+        repr->getInput()->updatePipeline();
+        repr->onVisibilityChanged();
+//        repr->setModifiedState(pqProxy::MODIFIED);
+        viewlist.insert(view);
+      }
+    }
+  }
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
+{
+  static double fake_time = 0.0;
+  std::set<pqView*> viewlist;
+  proxy->MarkDirty(proxy);
+  GetViewsForPipeline(proxy, viewlist);
+  //
+  // Update all views which are associated with out pipelines
+  //
+  for (std::set<pqView*>::iterator it=viewlist.begin(); it!=viewlist.end(); ++it) {
+    (*it)->render();
+//        repr->renderView(true);
+  }
 }
