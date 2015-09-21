@@ -151,6 +151,7 @@ vtkZeqManager::vtkZeqManager() : _servicename("_hbp._tcp"), _service(_servicenam
   this->abort_poll              = 0;
   this->thread_done             = 1;
   this->SelectedGIDs            = NULL;
+  this->_subscriber             = NULL;
   //
 #ifdef VTK_USE_MPI
   this->Controller              = NULL;
@@ -174,7 +175,7 @@ vtkZeqManager::~vtkZeqManager()
     sleep(1);
   }
   //
-  delete _subscriber;
+  if (_subscriber) delete _subscriber;
   //
   if (this->ZeqManagerInternals) delete this->ZeqManagerInternals;
   this->ZeqManagerInternals = NULL;
