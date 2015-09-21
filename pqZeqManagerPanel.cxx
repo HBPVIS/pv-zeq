@@ -66,6 +66,7 @@
 //
 #include "vtkZeqManager.h"
 #include <zeq/vocabulary.h>
+#include <monsteer/spikes_zeq_generated.h>
 //
 #include <vector>
 #include <regex>
@@ -125,7 +126,7 @@ pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
   //
   this->connect(this, SIGNAL(onaccept()), this, SLOT(onAccept()));
 
-  // Create a new notification socket to sned events from server to client
+  // Create a new notification socket to send events from server to client
   this->Internals->TcpNotificationServer = new QTcpServer(this);
   this->connect(this->Internals->TcpNotificationServer,
     SIGNAL(newConnection()), SLOT(onNewNotificationSocket()));
@@ -141,12 +142,13 @@ void pqZeqManagerPanel::LoadSettings()
 {
   pqSettings *settings = pqApplicationCore::instance()->settings();
   settings->beginGroup("ZeqManager");
-  /*
-  // KernelType
-  this->UI->KernelType->setCurrentIndex(settings->value("KernelType", 0).toInt());
-  // HCoefficient
-  this->UI->HCoefficient->setText(settings->value("HCoefficient", 1.5).toString());
-  */
+
+  // Autostart
+  this->Internals->autostart->setChecked(settings->value("autostart", true).toBool());
+  // mode
+  this->Internals->zeq_both->setChecked(settings->value("zeq_both", true).toBool());
+  this->Internals->zeq_gui->setChecked(settings->value("zeq_gui", true).toBool());
+  this->Internals->zeq_server->setChecked(settings->value("zeq_server", true).toBool());
   settings->endGroup();
 }
 //----------------------------------------------------------------------------
@@ -154,13 +156,22 @@ void pqZeqManagerPanel::SaveSettings()
 {
   pqSettings *settings = pqApplicationCore::instance()->settings();
   settings->beginGroup("ZeqManager");
-  /*
-  // KernelType
-  settings->setValue("KernelType", this->UI->KernelType->currentIndex());
-  // HCoefficient
-  settings->setValue("HCoefficient", this->UI->HCoefficient->text());
-  */
+
+  // Autostart
+  settings->setValue("autostart", this->Internals->autostart->isChecked());
+  // mode
+  settings->setValue("zeq_both", this->Internals->zeq_both->isChecked());
+  settings->setValue("zeq_gui", this->Internals->zeq_gui->isChecked());
+  settings->setValue("zeq_server", this->Internals->zeq_server->isChecked());
   settings->endGroup();
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::AutoStart()
+{
+  if (this->Internals->autostart->isChecked()) {
+    this->onStart();
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -305,28 +316,6 @@ void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_d
   else {
     this->Internals->listModel << "No BBP source proxy to set Ids on";
   }
-
-  // 
-  // @TODO Find a way to 'accept' all 3D widgets so that we can
-  // trigger the writer with the correct values
-  //
-//  pqActiveObjects::instance().activeView()->forceRender();
-
-/*
-  // find the pipeline associated with this source
-  pqPipelineSource* pqsource = pqApplicationCore::instance()->
-  getServerManagerModel()->findItem<pqPipelineSource*>(source);
-  // and find all views it is present in
-  if (pqsource) {
-    foreach (pqView *view, pqsource->getViews()) {
-      pqDataRepresentation *repr = pqsource->getRepresentation(0, view);
-      if (repr && repr->isVisible()) {
-        // add them to the list
-        viewlist.insert(view);
-      }
-    }
-  }
- */
 }
 
 //-----------------------------------------------------------------------------
@@ -342,8 +331,6 @@ void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<p
       if (repr && repr->isVisible()) {
         // add them to the list
         repr->getInput()->updatePipeline();
-        repr->onVisibilityChanged();
-//        repr->setModifiedState(pqProxy::MODIFIED);
         viewlist.insert(view);
       }
     }
@@ -353,7 +340,6 @@ void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<p
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
 {
-  static double fake_time = 0.0;
   std::set<pqView*> viewlist;
   proxy->MarkDirty(proxy);
   GetViewsForPipeline(proxy, viewlist);
@@ -362,6 +348,5 @@ void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
   //
   for (std::set<pqView*>::iterator it=viewlist.begin(); it!=viewlist.end(); ++it) {
     (*it)->render();
-//        repr->renderView(true);
   }
 }

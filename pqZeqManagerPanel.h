@@ -21,6 +21,7 @@ public:
 
   void LoadSettings();
   void SaveSettings();
+  void AutoStart();
 
 private slots:
   void onAccept();
