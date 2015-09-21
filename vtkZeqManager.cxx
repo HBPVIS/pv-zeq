@@ -32,6 +32,8 @@
 //
 #include <servus/uri.h>
 #include <zeq/vocabulary.h>
+#include <monsteer/spikes_zeq_generated.h>
+#include <monsteer/streaming/vocabulary.h>
 #include <boost/bind.hpp>
 #include <random>
 
@@ -237,6 +239,34 @@ void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 }
 
 //---------------------------------------------------------------------------
+void vtkZeqManager::onSpike( const zeq::Event& event )
+{
+    const monsteer::streaming::SpikeMap& spikes = monsteer::streaming::deserializeSpikes( event );
+
+    monsteer::streaming::SpikeMap _incoming;
+    _incoming.insert( spikes.begin(), spikes.end( ));
+
+    float _lastTimeStamp;
+
+    if( !_incoming.empty() )
+        _lastTimeStamp = _incoming.rbegin()->first;
+
+
+  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
+  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
+//  Ids.resize(1000);
+  std::cout << "Zeq Manager got Ids " << Ids.size() << std::endl;
+  for (int i=0; i<std::min((size_t)(5),Ids.size()); ++i) {
+    std::cout << Ids[i] << ",";
+  }
+  std::cout << std::endl;
+  //
+  event_data data = {event.getType(), Ids.size() };
+  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  this->ZeqManagerInternals->NotificationSocket->Send(&Ids[0], Ids.size()*sizeof(unsigned int));
+}
+
+//---------------------------------------------------------------------------
 void vtkZeqManager::Start()
 {
   if (this->UpdatePiece == 0) {
@@ -374,6 +404,9 @@ int vtkZeqManager::Create()
                                           this, _1 ));
   _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS,
                               boost::bind( &vtkZeqManager::onSelectedIds,
+                                          this, _1 ));
+  _subscriber->registerHandler( monsteer::streaming::EVENT_SPIKE,
+                              boost::bind( &vtkZeqManager::onSpike,
                                           this, _1 ));
 
   //

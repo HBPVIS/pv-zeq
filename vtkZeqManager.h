@@ -86,6 +86,7 @@ protected:
   void onLookupTable1D( const zeq::Event& event );
   void onRequest( const zeq::Event& event );
   void onSelectedIds( const zeq::Event& event );
+  void onSpike( const zeq::Event& event );
 
   int Create();
   void Discover();
