@@ -78,8 +78,6 @@ public:
   vtkGetStringMacro(HostsDescription);
   vtkSetStringMacro(HostsDescription);
 
-  void SetSelectedGIDs(int maxvalues, unsigned int *values);
-
   vtkSetMacro(ClientSideMode,int);
   vtkGetMacro(ClientSideMode,int);
   vtkBooleanMacro(ClientSideMode,int);
@@ -96,9 +94,9 @@ protected:
   void onRequest( const zeq::Event& event );
   void onSelectedIds( const zeq::Event& event );
 
-  int Create();
+  int  Create();
   void Discover();
-  int CreateNotificationSocket();
+  int  CreateNotificationSocket();
 
 
   uint16_t          _port;
@@ -111,9 +109,6 @@ protected:
   // Zeq manager variables
   //
   static vtkZeqManager *ZeqManagerSingleton;
-  // The most recent selection list
-  vtkUnsignedIntArray  *SelectedGIDs;
-
 
   // Description:
   // Wait for a notification - notifications are used to trigger user

@@ -39,7 +39,7 @@ private slots:
 
 protected:
 
-  void UpdateSelection(const vtkZeqManager::event_data &event_data, char *data);
+  void UpdateSelection(const vtkZeqManager::event_data &event_data, uint32_t *data);
 
   void GetViewsForPipeline(vtkSMSourceProxy *source, std::set<pqView*> &viewlist);
   void UpdateViews(vtkSMSourceProxy *proxy);

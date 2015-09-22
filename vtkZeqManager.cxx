@@ -150,7 +150,6 @@ vtkZeqManager::vtkZeqManager() : _servicename("_hbp._tcp"), _service(_servicenam
   this->HostsDescription        = NULL;
   this->abort_poll              = 0;
   this->thread_done             = 1;
-  this->SelectedGIDs            = NULL;
   this->_subscriber             = NULL;
   this->ClientSideMode          = 0;
   //
@@ -185,11 +184,11 @@ vtkZeqManager::~vtkZeqManager()
   //
   vtkZeqManager::ZeqManagerSingleton=NULL;
 }
+
 //---------------------------------------------------------------------------
 void vtkZeqManager::Discover()
 {
-    //std::cout << "Received a refresh command " << std::endl;
-    _hosts = _service.discover( servus::Servus::IF_ALL, 500 );
+    _hosts = _service.discover( servus::Servus::IF_ALL, 50 );
     if( _hosts.empty() ) {
         vtkErrorMacro("No hosts found");
     }
@@ -252,7 +251,6 @@ void* vtkZeqManager::NotificationThread()
   //
   int FAIL_FAIL = 0;
   while (!this->abort_poll && this->WaitForUnlock(NULL) != FAIL_FAIL) {
-
     // poll for 100ms, if nothing try again.
     // we do it like this so that we can exit more cleanly than setting timeout to zero
     // and getting a segfault when we destruct
@@ -341,7 +339,7 @@ int vtkZeqManager::Create()
   this->UpdateNumPieces = this->Controller->GetNumberOfProcesses();
   if (this->ZeqManagerInternals->NotificationSocket!=NULL) {
     // already created
-    return;
+    return 0;
   }
 
   if (!this->ClientSideMode) {
@@ -381,7 +379,7 @@ int vtkZeqManager::Create()
                                           this, _1 ));
 */
 
-  _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA, this->CameraCallback);
+  _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA,      this->CameraCallback);
   _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
 
   //
@@ -394,12 +392,6 @@ int vtkZeqManager::Create()
   this->ZeqManagerInternals->WaitForNotifThreadCreated();
 
   return 0;
-}
-
-//----------------------------------------------------------------------------
-void vtkZeqManager::SetSelectedGIDs(int maxvalues, unsigned int *values)
-{
-  std::cout << "Got ids " << maxvalues << std::endl;
 }
 
 //----------------------------------------------------------------------------
