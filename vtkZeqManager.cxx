@@ -32,6 +32,7 @@
 //
 #include <servus/uri.h>
 #include <zeq/vocabulary.h>
+#include <monsteer/streaming/vocabulary.h>
 #include <boost/bind.hpp>
 #include <random>
 
@@ -201,32 +202,43 @@ void vtkZeqManager::Discover()
 //---------------------------------------------------------------------------
 void vtkZeqManager::onHBPCamera( const zeq::Event& event )
 {
-  vtkZeqManager::event_data data = {event.getType(), event.getSize() };
-  //
+  // forward the event directly to the client
+  event_data data = {event.getType(), event.getSize() };
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
   this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
 }
 
 //---------------------------------------------------------------------------
-void vtkZeqManager::onLookupTable1D( const zeq::Event& event )
-{
-    std::cout << "Got a onLookupTable1D event" << std::endl;
-}
-
-//---------------------------------------------------------------------------
-void vtkZeqManager::onRequest( const zeq::Event& event )
-{
-    std::cout << "Got a request (vocabulary) event" << std::endl;
-}
-
-//---------------------------------------------------------------------------
 void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 {
-  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
-  //
-  event_data data = {event.getType(), Ids.size() };
+  // forward the event directly to the client
+  event_data data = {event.getType(), event.getSize() };
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
-  this->ZeqManagerInternals->NotificationSocket->Send(&Ids[0], Ids.size()*sizeof(unsigned int));
+  this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
+}
+
+//---------------------------------------------------------------------------
+void vtkZeqManager::onSpike( const zeq::Event& event )
+{
+  // forward the event directly to the client
+  event_data data = {event.getType(), event.getSize() };
+  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
+
+/*
+    const monsteer::streaming::SpikeMap& spikes = monsteer::streaming::deserializeSpikes( event );
+
+    monsteer::streaming::SpikeMap _incoming;
+    _incoming.insert( spikes.begin(), spikes.end( ));
+
+    float _lastTimeStamp;
+
+    if( !_incoming.empty() )
+        _lastTimeStamp = _incoming.rbegin()->first;
+*/
+
+//
+//  event_data data = {event.getType(), Ids.size() };
 }
 
 //---------------------------------------------------------------------------
@@ -368,27 +380,19 @@ int vtkZeqManager::Create()
   if (!this->ClientSideMode) {
     this->SelectionCallback = zeq_callback(boost::bind( &vtkZeqManager::onSelectedIds, this, _1 ));
     this->CameraCallback = zeq_callback(boost::bind( &vtkZeqManager::onHBPCamera, this, _1 ));
+    this->SpikeCallback = zeq_callback(boost::bind( &vtkZeqManager::onSpike, this, _1 ));
   }
-/*
-  _subscriber->registerHandler( zeq::hbp::EVENT_LOOKUPTABLE1D,
-                              boost::bind( &vtkZeqManager::onLookupTable1D,
-                                          this, _1 ));
-
-  _subscriber->registerHandler( zeq::vocabulary::EVENT_REQUEST,
-                              boost::bind( &vtkZeqManager::onRequest,
-                                          this, _1 ));
-*/
-
   _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA,      this->CameraCallback);
   _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
+  _subscriber->registerHandler( monsteer::streaming::EVENT_SPIKES, this->SpikeCallback);
 
   //
   // start thread to listen on zeq events
   //
   this->thread_done = 0;
   this->ZeqManagerInternals->NotificationThreadID =
-  this->ZeqManagerInternals->NotificationThread->SpawnThread(
-    vtkZeqManagerNotificationThread, (void *) this);
+    this->ZeqManagerInternals->NotificationThread->SpawnThread(
+      vtkZeqManagerNotificationThread, (void *) this);
   this->ZeqManagerInternals->WaitForNotifThreadCreated();
 
   return 0;
@@ -405,3 +409,10 @@ void vtkZeqManager::SetCameraCallback(zeq_callback cb)
 {
   this->CameraCallback = cb;
 }
+
+//----------------------------------------------------------------------------
+void vtkZeqManager::SetSpikeCallback(zeq_callback cb)
+{
+  this->SpikeCallback = cb;
+}
+

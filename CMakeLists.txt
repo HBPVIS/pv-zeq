@@ -93,6 +93,13 @@ find_package(zeq)
 include_directories(${ZEQ_INCLUDE_DIRS})
 
 #--------------------------------------------------
+# Monsteer
+#--------------------------------------------------
+find_package(Monsteer)
+include_directories(${MONSTEER_INCLUDE_DIRS})
+message("dirs are ${MONSTEER_INCLUDE_DIRS}")
+
+#--------------------------------------------------
 # Set Includes
 #--------------------------------------------------
 INCLUDE_DIRECTORIES(
@@ -227,7 +234,7 @@ SET_TARGET_PROPERTIES(${PLUGIN_NAME} PROPERTIES COMPILE_FLAGS "${OpenMP_CXX_FLAG
 TARGET_LINK_LIBRARIES(${PLUGIN_NAME}
   PUBLIC
     vtksys
-    Lunchbox
+    Monsteer
     zeq
     zeqHBP
 )

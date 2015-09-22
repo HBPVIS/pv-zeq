@@ -84,15 +84,15 @@ public:
 
   void SetSelectionCallback(zeq_callback cb);
   void SetCameraCallback(zeq_callback cb);
+  void SetSpikeCallback(zeq_callback cb);
 
 protected:
    vtkZeqManager();
   ~vtkZeqManager();
 
   void onHBPCamera( const zeq::Event& event );
-  void onLookupTable1D( const zeq::Event& event );
-  void onRequest( const zeq::Event& event );
   void onSelectedIds( const zeq::Event& event );
+  void onSpike( const zeq::Event& event );
 
   int  Create();
   void Discover();
@@ -104,6 +104,7 @@ protected:
   servus::Servus    _service;
   servus::Strings   _hosts;
   zeq::Subscriber  *_subscriber;
+//  zeq::Subscriber  *_subscriber_monster;
 
   //
   // Zeq manager variables
@@ -126,6 +127,7 @@ protected:
 
   zeq_callback SelectionCallback;
   zeq_callback CameraCallback;
+  zeq_callback SpikeCallback;
 
   vtkMultiProcessController *Controller;
 

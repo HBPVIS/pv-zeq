@@ -27,20 +27,25 @@ public:
   bool ClientSideZeqReady();
 
   void onHBPCamera( const zeq::Event& event );
-  void onLookupTable1D( const zeq::Event& event );
-  void onRequest( const zeq::Event& event );
   void onSelectedIds( const zeq::Event& event );
+  void onSpike( const zeq::Event& event );
+
+signals:
+  void doUpdateGUIMessage(const QString &msg);
 
 private slots:
   void onAccept();
   void onStart();
   void onNewNotificationSocket();
   void onNotified();
+  void UpdateGUIMessage(const QString &msg);
 
 protected:
 
-  void UpdateSelection(const vtkZeqManager::event_data &event_data, uint32_t *data);
-
+  void UpdateSelection(zeq::uint128_t Type, const void *buffer, size_t size);
+  void UpdateCamera(zeq::uint128_t Type, const void *buffer, size_t size);
+  void UpdateSpikes(zeq::uint128_t Type, const void *buffer, size_t size);
+  //
   void GetViewsForPipeline(vtkSMSourceProxy *source, std::set<pqView*> &viewlist);
   void UpdateViews(vtkSMSourceProxy *proxy);
 

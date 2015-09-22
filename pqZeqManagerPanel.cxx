@@ -1,6 +1,7 @@
 #include "pqZeqManagerPanel.h"
 //
 #include <boost/bind.hpp>
+#include <boost/core/null_deleter.hpp>
 
 // Qt includes
 #include <QTreeWidget>
@@ -68,6 +69,7 @@
 //
 #include "vtkZeqManager.h"
 #include <zeq/vocabulary.h>
+#include <monsteer/streaming/vocabulary.h>
 //
 #include <vector>
 #include <regex>
@@ -139,6 +141,9 @@ pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
     SIGNAL(newConnection()), SLOT(onNewNotificationSocket()));
   this->Internals->TcpNotificationServer->listen(QHostAddress::Any,
     VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT);
+
+  QObject::connect(this, SIGNAL(doUpdateGUIMessage(const QString&)),
+    this, SLOT(UpdateGUIMessage(const QString&)));
 }
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::~pqZeqManagerPanel()
@@ -212,6 +217,10 @@ void pqZeqManagerPanel::onStart()
 }
 
 //-----------------------------------------------------------------------------
+//
+// @TODO, clean this up so that the message from zeq is forwarded directly
+// to the GUI and then deserialized once in the relevant function
+//
 void pqZeqManagerPanel::onNotified()
 {
   int error = 0;
@@ -219,67 +228,50 @@ void pqZeqManagerPanel::onNotified()
   //
   const zeq::uint128_t new_connection = zeq::make_uint128("zeq::hbp::NewConnection");
   //
-  std::stringstream temp;
-  //
   vtkZeqManager::event_data event_data;
   //
   while (this->Internals->TcpNotificationSocket->size() > 0) {
-    std::cout << "bytes available " << this->Internals->TcpNotificationSocket->bytesAvailable() << std::endl;
+
+    //
+    std::stringstream temp;
     temp << this->Internals->event_num++ << " : ";
+
     // read event block
     bytes_read = this->Internals->TcpNotificationSocket->read(
       reinterpret_cast<char*>(&event_data), sizeof(vtkZeqManager::event_data));
     if (bytes_read != sizeof(vtkZeqManager::event_data)) {
       error = 1;
-      temp << "read " << bytes_read << " bytes of data";
+      temp << "Error in data header size";
       break;
     }
 
-    // read the remainder of the event data
+    // read data block
     std::vector<char> buffer;
-    if (event_data.Type == new_connection ||
-        event_data.Type == zeq::hbp::EVENT_CAMERA ||
-        event_data.Type == zeq::hbp::EVENT_SELECTEDIDS)
-    {
-      std::cout << "Get a recognized message type " << std::endl;
+    //
+    buffer.resize(event_data.Size);
+    bytes_read = this->Internals->TcpNotificationSocket->read(
+                   reinterpret_cast<char*>(&buffer[0]), event_data.Size);
+    if (bytes_read!=event_data.Size) {
+      temp << "Error in data block size";
+      continue;
     }
-    else {
-      error = 1;
-      temp << "Unrecognized/Unsupported event " << event_data.Type;
-    }
+
     // process the event
     if (event_data.Type == new_connection) {
-      temp << "New Zeq connection";
       this->Internals->eventview->setModel(&this->Internals->listModel);
+      emit doUpdateGUIMessage(QString(temp.str().c_str()) + "New Zeq connection");
     }
     // if (this->Internals->DsmProxyCreated() && this->Internals->DsmInitialized) {
     else if (event_data.Type == zeq::hbp::EVENT_CAMERA) {
-      temp << "New Camera";
-        //emit this->UpdateData();
+      emit doUpdateGUIMessage(QString(temp.str().c_str()) + "CameraEvent");
+      this->UpdateCamera(event_data.Type, buffer.data(), buffer.size());
     }
     else if (event_data.Type == zeq::hbp::EVENT_SELECTEDIDS) {
-      temp << "New Selected Ids : size ";
-      temp << event_data.Size;
-      if (event_data.Size>0) {
-        buffer.resize(event_data.Size*sizeof(int));
-        bytes_read = this->Internals->TcpNotificationSocket->read(
-                       reinterpret_cast<char*>(&buffer[0]), event_data.Size*sizeof(int));
-        if (bytes_read!=event_data.Size*sizeof(int)) {
-          temp << "Error in data size";
-          continue;
-        }
-      }
-      this->UpdateSelection(event_data, (uint32_t*)(&buffer[0]));
+      this->UpdateSelection(event_data.Type, buffer.data(), buffer.size());
     }
-    this->Internals->listModel << temp.str().c_str();
-    this->Internals->eventview->scrollToBottom();
-
-    if (!error) {
-      // read data for event itself
-      std::cout << "Updated" << std::endl;
+    else if (event_data.Type == monsteer::streaming::EVENT_SPIKES) {
+      this->UpdateSpikes(event_data.Type, buffer.data(), buffer.size());
     }
-      // TODO steered objects are not updated for now
-      // this->Internals->DsmProxy->InvokeCommand("UpdateSteeredObjects");
 
     // signal back to the server that we have done with this event and it can proceed with the next
     this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
@@ -287,8 +279,15 @@ void pqZeqManagerPanel::onNotified()
 }
 
 //-----------------------------------------------------------------------------
-void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_data, uint32_t *data)
+void pqZeqManagerPanel::UpdateSelection(zeq::uint128_t Type, const void *buffer, size_t size)
 {
+  zeq::Event event(Type);
+  event.setData(zeq::ConstByteArray((uint8_t*)(buffer), boost::null_deleter()), size);
+  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
+  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
+  //
+  
+  //
   pqServerManagerModel *sm = pqApplicationCore::instance()->getServerManagerModel();
   QList<pqPipelineSource*> pqsources = sm->findItems<pqPipelineSource*>(NULL);
   vtkSMSourceProxy *proxy = NULL;
@@ -297,18 +296,17 @@ void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_d
     for (QList<pqPipelineSource*>::iterator it = pqsources.begin(); it != pqsources.end(); ++it) {
       proxy = (*it)->getSourceProxy();
       if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
-        this->Internals->listModel << "Setting Ids on " + (*it)->getSMName();
-        this->Internals->eventview->scrollToBottom();
-
+        //
+        int numValues = Ids.size();
+        emit doUpdateGUIMessage(QString("Setting " + QString(numValues) + " Ids on " + (*it)->getSMName()));
         //
         vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
-        int numValues = event_data.Size;
         vtkClientServerStream::Array array =
         {
           vtkClientServerStream::int32_array,
           static_cast<vtkTypeUInt32>(numValues),
           static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
-          (int*)(data)
+          (int*)(&Ids[0])
         };
 
         vtkClientServerStream stream;
@@ -320,15 +318,28 @@ void pqZeqManagerPanel::UpdateSelection(const vtkZeqManager::event_data &event_d
         stream << vtkClientServerStream::End;
 
         proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
-
+        (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
         proxy->Modified();
+        proxy->MarkDirty(proxy);
         this->UpdateViews(proxy);
       }
     }
   }
   else {
-    this->Internals->listModel << "No BBP source proxy to set Ids on";
+    emit doUpdateGUIMessage("No BBP source proxy to set Ids on");
   }
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::UpdateCamera(zeq::uint128_t Type, const void *buffer, size_t size)
+{
+  emit doUpdateGUIMessage("Setting camera");
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::UpdateSpikes(zeq::uint128_t Type, const void *buffer, size_t size)
+{
+  emit doUpdateGUIMessage("Setting spikes");
 }
 
 //-----------------------------------------------------------------------------
@@ -342,6 +353,7 @@ void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<p
     foreach (pqView *view, pqsource->getViews()) {
       pqDataRepresentation *repr = pqsource->getRepresentation(0, view);
       if (repr && repr->isVisible()) {
+        repr->getProxy()->MarkDirty(source);
         // add them to the list
         viewlist.insert(view);
       }
@@ -353,7 +365,6 @@ void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<p
 void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
 {
   std::set<pqView*> viewlist;
-  proxy->MarkDirty(proxy);
   this->GetViewsForPipeline(proxy, viewlist);
   //
   // Update all views which are associated with out pipelines
@@ -380,6 +391,8 @@ bool pqZeqManagerPanel::ClientSideZeqReady()
         boost::bind( &pqZeqManagerPanel::onSelectedIds, this, _1 ));
       this->Internals->clientOnlyZeqManager->SetCameraCallback(
         boost::bind( &pqZeqManagerPanel::onHBPCamera, this, _1 ));
+      this->Internals->clientOnlyZeqManager->SetSpikeCallback(
+        boost::bind( &pqZeqManagerPanel::onSpike, this, _1 ));
       //
       this->Internals->clientOnlyZeqManager->Start();
       //
@@ -391,34 +404,57 @@ bool pqZeqManagerPanel::ClientSideZeqReady()
 }
 
 //-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onSpike( const zeq::Event& event )
+{
+  const monsteer::streaming::SpikeMap& spikes = monsteer::streaming::deserializeSpikes( event );
+
+  monsteer::streaming::SpikeMap _incoming;
+  _incoming.insert( spikes.begin(), spikes.end( ));
+
+  float _lastTimeStamp;
+
+  if( !_incoming.empty() ) {
+      _lastTimeStamp = _incoming.rbegin()->first;
+  }
+
+  //
+
+  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
+  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
+//  Ids.resize(1000);
+  std::cout << "Zeq Manager got Ids " << Ids.size() << std::endl;
+  for (int i=0; i<std::min((size_t)(5),Ids.size()); ++i) {
+    std::cout << Ids[i] << ",";
+  }
+  std::cout << std::endl;
+
+
+  emit doUpdateGUIMessage("Received Spike data ");
+  //
+  this->Internals->clientOnlyZeqManager->SignalUpdated();
+}
+
+//-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onHBPCamera( const zeq::Event& event )
 {
+  emit doUpdateGUIMessage("Received camera data ");
+  //
+  this->Internals->clientOnlyZeqManager->SignalUpdated();
 }
 
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
 {
-  std::vector<unsigned int> Ids2 = zeq::hbp::deserializeSelectedIDs( event );
-  uint32_t *Ids = new unsigned int[Ids2.size()];
-  std::copy(Ids2.begin(), Ids2.end(), Ids);
-  //
-  vtkZeqManager::event_data event_data = {event.getType(), Ids2.size() };
-  this->UpdateSelection(event_data, Ids);
-  std::stringstream temp;
-  temp << "Received Selected Ids " << Ids2.size();
-  this->Internals->listModel << temp.str().c_str();
-//  this->Internals->eventview->scrollToBottom();
-  //
+  // forward the event directly to the client
+  vtkZeqManager::event_data data = {event.getType(), event.getSize() };
+  this->UpdateSelection(event.getType(), event.getData(), event.getSize());
   //
   this->Internals->clientOnlyZeqManager->SignalUpdated();
 }
-/*
-signals:
-  void mySignalToMainThread();
 
 //-----------------------------------------------------------------------------
-void pqZeqManagerPanel::doThisOnMainThread()
+void pqZeqManagerPanel::UpdateGUIMessage(const QString &msg)
 {
+  this->Internals->listModel << msg;
+  this->Internals->eventview->scrollToBottom();
 }
-
-*/
