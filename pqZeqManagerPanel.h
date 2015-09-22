@@ -23,6 +23,14 @@ public:
   void SaveSettings();
   void AutoStart();
 
+  bool ClientSideZeq();
+  bool ClientSideZeqReady();
+
+  void onHBPCamera( const zeq::Event& event );
+  void onLookupTable1D( const zeq::Event& event );
+  void onRequest( const zeq::Event& event );
+  void onSelectedIds( const zeq::Event& event );
+
 private slots:
   void onAccept();
   void onStart();

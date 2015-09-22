@@ -43,6 +43,9 @@ public:
   }
 
   bool ZeqReady() {
+    if (this->ZeqManagerPanel && this->ZeqManagerPanel->ClientSideZeq()) {
+      return this->ZeqManagerPanel->ClientSideZeqReady();
+    }
     if (!this->ProxyReady()) return 0;
     //
     if (!this->ZeqInitialized) {

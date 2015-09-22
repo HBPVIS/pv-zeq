@@ -1,4 +1,6 @@
 #include "pqZeqManagerPanel.h"
+//
+#include <boost/bind.hpp>
 
 // Qt includes
 #include <QTreeWidget>
@@ -94,11 +96,15 @@ public:
   pqInternals(pqZeqManagerPanel* p) : QObject(p)
   {
     this->Links = new pqPropertyLinks;
+    this->clientOnlyZeqManager = NULL;
     event_num = 0;
   }
   //
   ~pqInternals() {
     delete this->Links;
+    if (this->clientOnlyZeqManager) {
+      this->clientOnlyZeqManager->Delete();
+    }
   }
   //
   pqPropertyLinks         *Links;
@@ -106,7 +112,9 @@ public:
   QTcpSocket*              TcpNotificationSocket;
   StringList               listModel;
   static int               event_num;
+  vtkZeqManager           *clientOnlyZeqManager;
 };
+//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 int pqZeqManagerPanel::pqInternals::event_num = 0;
 //----------------------------------------------------------------------------
@@ -194,7 +202,14 @@ void pqZeqManagerPanel::onAccept()
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onStart()
 {
+  // normal client server operation uses a proxy
+  if (!this->ClientSideZeq()) {
     this->referenceProxy()->getProxy()->InvokeCommand("Start");
+  }
+  // special gui mode create a local vtkZeqManager
+  else {
+    this->ClientSideZeqReady();
+  }
 }
 
 //-----------------------------------------------------------------------------
@@ -349,4 +364,54 @@ void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
   for (std::set<pqView*>::iterator it=viewlist.begin(); it!=viewlist.end(); ++it) {
     (*it)->render();
   }
+}
+
+//-----------------------------------------------------------------------------
+bool pqZeqManagerPanel::ClientSideZeq()
+{
+  if (this->Internals->zeq_gui->isChecked()) return true;
+  return false;
+}
+
+//-----------------------------------------------------------------------------
+bool pqZeqManagerPanel::ClientSideZeqReady()
+{
+    if (this->Internals->clientOnlyZeqManager==NULL) {
+      this->Internals->clientOnlyZeqManager = vtkZeqManager::New();
+      this->Internals->clientOnlyZeqManager->SetClientSideMode(1);
+      this->Internals->clientOnlyZeqManager->SetSelectionCallback(
+        boost::bind( &pqZeqManagerPanel::onSelectedIds, this, _1 ));
+      this->Internals->clientOnlyZeqManager->SetCameraCallback(
+        boost::bind( &pqZeqManagerPanel::onHBPCamera, this, _1 ));
+      //
+      this->Internals->clientOnlyZeqManager->Start();
+      //
+      this->Internals->listModel << "Client only zeq connection";
+      this->Internals->eventview->setModel(&this->Internals->listModel);
+      this->Internals->eventview->scrollToBottom();
+    }
+    return true;
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onHBPCamera( const zeq::Event& event )
+{
+}
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
+{
+  std::vector<unsigned int> Ids2 = zeq::hbp::deserializeSelectedIDs( event );
+  unsigned int *Ids = new unsigned int[Ids2.size()];
+  std::copy(Ids2.begin(), Ids2.end(), Ids);
+  //
+  vtkZeqManager::event_data event_data = {event.getType(), Ids2.size() };
+  std::stringstream temp;
+  temp << "Received Selected Ids " << Ids2.size();
+  this->Internals->listModel << temp.str().c_str();
+  this->Internals->eventview->scrollToBottom();
+  //
+  this->UpdateSelection(event_data, (char*)(Ids));
+  //
+  this->Internals->clientOnlyZeqManager->SignalUpdated();
 }

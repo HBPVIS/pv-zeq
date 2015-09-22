@@ -43,6 +43,8 @@ public:
   //BTX
   struct vtkZeqManagerInternals;
   vtkZeqManagerInternals *ZeqManagerInternals;
+  
+  typedef std::function<void (const zeq::Event&)> zeq_callback;
   //ETX
 
   struct event_data {
@@ -78,6 +80,13 @@ public:
 
   void SetSelectedGIDs(int maxvalues, unsigned int *values);
 
+  vtkSetMacro(ClientSideMode,int);
+  vtkGetMacro(ClientSideMode,int);
+  vtkBooleanMacro(ClientSideMode,int);
+
+  void SetSelectionCallback(zeq_callback cb);
+  void SetCameraCallback(zeq_callback cb);
+
 protected:
    vtkZeqManager();
   ~vtkZeqManager();
@@ -89,6 +98,8 @@ protected:
 
   int Create();
   void Discover();
+  int CreateNotificationSocket();
+
 
   uint16_t          _port;
   std::string       _servicename;
@@ -116,6 +127,10 @@ protected:
   int            UpdateNumPieces;
   int            abort_poll;
   int            thread_done;
+  int            ClientSideMode;
+
+  zeq_callback SelectionCallback;
+  zeq_callback CameraCallback;
 
   vtkMultiProcessController *Controller;
 

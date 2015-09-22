@@ -152,6 +152,7 @@ vtkZeqManager::vtkZeqManager() : _servicename("_hbp._tcp"), _service(_servicenam
   this->thread_done             = 1;
   this->SelectedGIDs            = NULL;
   this->_subscriber             = NULL;
+  this->ClientSideMode          = 0;
   //
 #ifdef VTK_USE_MPI
   this->Controller              = NULL;
@@ -201,8 +202,8 @@ void vtkZeqManager::Discover()
 //---------------------------------------------------------------------------
 void vtkZeqManager::onHBPCamera( const zeq::Event& event )
 {
-  //std::cout << "Got a onHBPCamera event" << std::endl;
   vtkZeqManager::event_data data = {event.getType(), event.getSize() };
+  //
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
   this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
 }
@@ -222,14 +223,7 @@ void vtkZeqManager::onRequest( const zeq::Event& event )
 //---------------------------------------------------------------------------
 void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 {
-  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
   std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
-//  Ids.resize(1000);
-  std::cout << "Zeq Manager got Ids " << Ids.size() << std::endl;
-  for (int i=0; i<std::min((size_t)(5),Ids.size()); ++i) {
-    std::cout << Ids[i] << ",";
-  }
-  std::cout << std::endl;
   //
   event_data data = {event.getType(), Ids.size() };
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
@@ -252,7 +246,9 @@ void* vtkZeqManager::NotificationThread()
 
   this->ZeqManagerInternals->SignalNotifThreadCreated();
   //
-  this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  if (!this->ClientSideMode) {
+    this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
+  }
   //
   int FAIL_FAIL = 0;
   while (!this->abort_poll && this->WaitForUnlock(NULL) != FAIL_FAIL) {
@@ -303,16 +299,9 @@ void vtkZeqManager::WaitForUpdated()
 int vtkZeqManager:: WaitForUnlock(const void *flag) { return 1; }
 
 //----------------------------------------------------------------------------
-int vtkZeqManager::Create()
+int vtkZeqManager::CreateNotificationSocket()
 {
-  this->UpdatePiece     = this->Controller->GetLocalProcessId();
-  this->UpdateNumPieces = this->Controller->GetNumberOfProcesses();
-  if (this->ZeqManagerInternals->NotificationSocket!=NULL) {
-    // already created
-    return;
-  }
   vtkProcessModule* pm = vtkProcessModule::GetProcessModule();
-
   vtkPVOptions *pvOptions = pm->GetOptions();
   const char *pvClientHostName = pvOptions->GetHostName();
   int notificationPort = VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT;
@@ -342,6 +331,23 @@ int vtkZeqManager::Create()
     }
   }
 
+  return 1;
+}
+
+//----------------------------------------------------------------------------
+int vtkZeqManager::Create()
+{
+  this->UpdatePiece     = this->Controller->GetLocalProcessId();
+  this->UpdateNumPieces = this->Controller->GetNumberOfProcesses();
+  if (this->ZeqManagerInternals->NotificationSocket!=NULL) {
+    // already created
+    return;
+  }
+
+  if (!this->ClientSideMode) {
+    this->CreateNotificationSocket();
+  }
+
   _subscriber = new zeq::Subscriber( servus::URI( "hbp://" ));
 
   std::default_random_engine generator;
@@ -361,10 +367,11 @@ int vtkZeqManager::Create()
     return 0;
   }
 
-  _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA,
-                              boost::bind( &vtkZeqManager::onHBPCamera,
-                                          this, _1 ));
-
+  if (!this->ClientSideMode) {
+    this->SelectionCallback = zeq_callback(boost::bind( &vtkZeqManager::onSelectedIds, this, _1 ));
+    this->CameraCallback = zeq_callback(boost::bind( &vtkZeqManager::onHBPCamera, this, _1 ));
+  }
+/*
   _subscriber->registerHandler( zeq::hbp::EVENT_LOOKUPTABLE1D,
                               boost::bind( &vtkZeqManager::onLookupTable1D,
                                           this, _1 ));
@@ -372,9 +379,10 @@ int vtkZeqManager::Create()
   _subscriber->registerHandler( zeq::vocabulary::EVENT_REQUEST,
                               boost::bind( &vtkZeqManager::onRequest,
                                           this, _1 ));
-  _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS,
-                              boost::bind( &vtkZeqManager::onSelectedIds,
-                                          this, _1 ));
+*/
+
+  _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA, this->CameraCallback);
+  _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
 
   //
   // start thread to listen on zeq events
@@ -394,3 +402,14 @@ void vtkZeqManager::SetSelectedGIDs(int maxvalues, unsigned int *values)
   std::cout << "Got ids " << maxvalues << std::endl;
 }
 
+//----------------------------------------------------------------------------
+void vtkZeqManager::SetSelectionCallback(zeq_callback cb)
+{
+  this->SelectionCallback = cb;
+}
+
+//----------------------------------------------------------------------------
+void vtkZeqManager::SetCameraCallback(zeq_callback cb)
+{
+  this->CameraCallback = cb;
+}
