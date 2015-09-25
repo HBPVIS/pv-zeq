@@ -298,29 +298,36 @@ void pqZeqManagerPanel::UpdateSelection(zeq::uint128_t Type, const void *buffer,
       if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
         //
         int numValues = Ids.size();
-        emit doUpdateGUIMessage(QString("Setting " + QString(numValues) + " Ids on " + (*it)->getSMName()));
+        emit doUpdateGUIMessage(QString("Setting ") + QString::number(numValues) + QString(" Ids on ") + (*it)->getSMName());
         //
-        vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
-        vtkClientServerStream::Array array =
-        {
-          vtkClientServerStream::int32_array,
-          static_cast<vtkTypeUInt32>(numValues),
-          static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
-          (int*)(&Ids[0])
-        };
-
         vtkClientServerStream stream;
-        stream << vtkClientServerStream::Invoke
-          << VTKOBJECT(proxy)
-          << "SetSelectedGIds"
-          << numValues
-          << array;
-        stream << vtkClientServerStream::End;
+        if (numValues>0) {
+          vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
+          vtkClientServerStream::Array array =
+          {
+            vtkClientServerStream::int32_array,
+            static_cast<vtkTypeUInt32>(numValues),
+            static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
+            (int*)(&Ids[0])
+          };
 
+          stream << vtkClientServerStream::Invoke
+            << VTKOBJECT(proxy)
+            << "SetSelectedGIds"
+            << static_cast<int>(numValues)
+            << stream.InsertArray((unsigned int*)(&Ids[0]), static_cast<int>(numValues));
+          stream << vtkClientServerStream::End;
+        }
+        else {
+          stream << vtkClientServerStream::Invoke
+            << VTKOBJECT(proxy)
+            << "ClearSelectedGIds"
+            << vtkClientServerStream::End;
+        }
         proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
         (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
         proxy->Modified();
-        proxy->MarkDirty(proxy);
+        proxy->MarkDirty(NULL);
         this->UpdateViews(proxy);
       }
     }
@@ -353,7 +360,6 @@ void pqZeqManagerPanel::GetViewsForPipeline(vtkSMSourceProxy *source, std::set<p
     foreach (pqView *view, pqsource->getViews()) {
       pqDataRepresentation *repr = pqsource->getRepresentation(0, view);
       if (repr && repr->isVisible()) {
-        repr->getProxy()->MarkDirty(source);
         // add them to the list
         viewlist.insert(view);
       }
@@ -416,18 +422,6 @@ void pqZeqManagerPanel::onSpike( const zeq::Event& event )
   if( !_incoming.empty() ) {
       _lastTimeStamp = _incoming.rbegin()->first;
   }
-
-  //
-
-  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
-  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
-//  Ids.resize(1000);
-  std::cout << "Zeq Manager got Ids " << Ids.size() << std::endl;
-  for (int i=0; i<std::min((size_t)(5),Ids.size()); ++i) {
-    std::cout << Ids[i] << ",";
-  }
-  std::cout << std::endl;
-
 
   emit doUpdateGUIMessage("Received Spike data ");
   //
