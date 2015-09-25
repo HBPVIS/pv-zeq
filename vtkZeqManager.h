@@ -103,8 +103,8 @@ protected:
   std::string       _servicename;
   servus::Servus    _service;
   servus::Strings   _hosts;
-  zeq::Subscriber  *_subscriber;
-//  zeq::Subscriber  *_subscriber_monster;
+  zeq::Subscriber  *_subscriber_hbp;
+  zeq::Subscriber  *_subscriber_monsteer;
 
   //
   // Zeq manager variables

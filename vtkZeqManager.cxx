@@ -151,7 +151,8 @@ vtkZeqManager::vtkZeqManager() : _servicename("_hbp._tcp"), _service(_servicenam
   this->HostsDescription        = NULL;
   this->abort_poll              = 0;
   this->thread_done             = 1;
-  this->_subscriber             = NULL;
+  this->_subscriber_hbp         = NULL;
+  this->_subscriber_monsteer    = NULL;
   this->ClientSideMode          = 0;
   //
 #ifdef VTK_USE_MPI
@@ -176,7 +177,8 @@ vtkZeqManager::~vtkZeqManager()
     sleep(1);
   }
   //
-  if (_subscriber) delete _subscriber;
+  if (_subscriber_hbp) delete _subscriber_hbp;
+  if (_subscriber_monsteer) delete _subscriber_monsteer;
   //
   if (this->ZeqManagerInternals) delete this->ZeqManagerInternals;
   this->ZeqManagerInternals = NULL;
@@ -266,10 +268,14 @@ void* vtkZeqManager::NotificationThread()
     // poll for 100ms, if nothing try again.
     // we do it like this so that we can exit more cleanly than setting timeout to zero
     // and getting a segfault when we destruct
-    int event = _subscriber->receive(100);
+    int event = _subscriber_hbp->receive(10);
     if (event) {
       this->WaitForUpdated();
     }
+    event = _subscriber_monsteer->receive(10);
+    if (event) {
+      this->WaitForUpdated();
+     }
   }
   this->thread_done = 1;
   return((void *)this);
@@ -358,7 +364,8 @@ int vtkZeqManager::Create()
     this->CreateNotificationSocket();
   }
 
-  _subscriber = new zeq::Subscriber( servus::URI( "hbp://" ));
+  _subscriber_hbp = new zeq::Subscriber( servus::URI( "hbp://" ));
+  _subscriber_monsteer = new zeq::Subscriber( servus::URI( "monsteer://" ));
 
   std::default_random_engine generator;
   std::uniform_int_distribution<int> distribution(0 + 1024,60000 + 1024);
@@ -382,9 +389,14 @@ int vtkZeqManager::Create()
     this->CameraCallback = zeq_callback(boost::bind( &vtkZeqManager::onHBPCamera, this, _1 ));
     this->SpikeCallback = zeq_callback(boost::bind( &vtkZeqManager::onSpike, this, _1 ));
   }
-  _subscriber->registerHandler( zeq::hbp::EVENT_CAMERA,      this->CameraCallback);
-  _subscriber->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
-  _subscriber->registerHandler( monsteer::streaming::EVENT_SPIKES, this->SpikeCallback);
+  _subscriber_hbp->registerHandler( zeq::hbp::EVENT_CAMERA,      this->CameraCallback);
+  _subscriber_hbp->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
+  _subscriber_hbp->registerHandler( monsteer::streaming::EVENT_SPIKES, this->SpikeCallback);
+
+  _subscriber_monsteer->registerHandler( zeq::hbp::EVENT_CAMERA,      this->CameraCallback);
+  _subscriber_monsteer->registerHandler( zeq::hbp::EVENT_SELECTEDIDS, this->SelectionCallback);
+  _subscriber_monsteer->registerHandler( monsteer::streaming::EVENT_SPIKES, this->SpikeCallback);
+
 
   //
   // start thread to listen on zeq events
