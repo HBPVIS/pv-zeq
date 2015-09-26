@@ -115,9 +115,11 @@ public:
   static int               event_num;
   vtkZeqManager           *clientOnlyZeqManager;
 };
+
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 int pqZeqManagerPanel::pqInternals::event_num = 0;
+
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
@@ -147,6 +149,10 @@ pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
 
   QObject::connect(this, SIGNAL(doUpdateRenderViews(vtkSMSourceProxy *)),
     this, SLOT(onUpdateRenderViews(vtkSMSourceProxy *)));
+
+  qRegisterMetaType<event_signal>("event_signal");
+  QObject::connect(this, SIGNAL(doInvokeStream(event_signal, const QString &, const QString &)),
+    this, SLOT(onInvokeStream(event_signal, const QString &, const QString &)));
 }
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::~pqZeqManagerPanel()
@@ -289,55 +295,6 @@ void pqZeqManagerPanel::UpdateSelection(zeq::uint128_t Type, const void *buffer,
   //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
   std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
   //
-  
-  //
-  pqServerManagerModel *sm = pqApplicationCore::instance()->getServerManagerModel();
-  QList<pqPipelineSource*> pqsources = sm->findItems<pqPipelineSource*>(NULL);
-  vtkSMSourceProxy *proxy = NULL;
-  if (pqsources.size()>0) {
-    std::regex bbp("BlueConfig.*");
-    for (QList<pqPipelineSource*>::iterator it = pqsources.begin(); it != pqsources.end(); ++it) {
-      proxy = (*it)->getSourceProxy();
-      if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
-        //
-        int numValues = Ids.size();
-        emit doUpdateGUIMessage(QString("Setting ") + QString::number(numValues) + QString(" Ids on ") + (*it)->getSMName());
-        //
-        vtkClientServerStream stream;
-        if (numValues>0) {
-          vtkSMProperty *GIDs = proxy->GetProperty("SelectedGIds");
-          vtkClientServerStream::Array array =
-          {
-            vtkClientServerStream::int32_array,
-            static_cast<vtkTypeUInt32>(numValues),
-            static_cast<vtkTypeUInt32>(sizeof(vtkClientServerStream::int32_value)*numValues),
-            (int*)(&Ids[0])
-          };
-
-          stream << vtkClientServerStream::Invoke
-            << VTKOBJECT(proxy)
-            << "SetSelectedGIds"
-            << static_cast<int>(numValues)
-            << stream.InsertArray((unsigned int*)(&Ids[0]), static_cast<int>(numValues));
-          stream << vtkClientServerStream::End;
-        }
-        else {
-          stream << vtkClientServerStream::Invoke
-            << VTKOBJECT(proxy)
-            << "ClearSelectedGIds"
-            << vtkClientServerStream::End;
-        }
-        proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
-        (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
-        proxy->Modified();
-        proxy->MarkDirty(NULL);
-        emit doUpdateRenderViews(proxy);
-      }
-    }
-  }
-  else {
-    emit doUpdateGUIMessage("No BBP source proxy to set Ids on");
-  }
 }
 
 //-----------------------------------------------------------------------------
@@ -422,7 +379,7 @@ void pqZeqManagerPanel::onSpike( const zeq::Event& event )
 
   float _lastTimeStamp;
 
-  if( !_incoming.empty() ) {
+  if ( !_incoming.empty() ) {
       _lastTimeStamp = _incoming.rbegin()->first;
   }
 
@@ -442,9 +399,14 @@ void pqZeqManagerPanel::onHBPCamera( const zeq::Event& event )
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
 {
-  // forward the event directly to the client
-  vtkZeqManager::event_data data = {event.getType(), event.getSize() };
-  this->UpdateSelection(event.getType(), event.getData(), event.getSize());
+  event_signal signal_data = event_signal(new zeq_event);
+  signal_data->buffer = new char[event.getSize()];
+  std::memcpy(signal_data->buffer, event.getData(), event.getSize());
+  signal_data->size   = event.getSize();
+  signal_data->Type   = event.getType();
+  emit doInvokeStream(signal_data, "SetSelectedGIds", "ClearSelectedGIds");
+
+//  this->UpdateSelection(event.getType(), event.getData(), event.getSize());
   //
   this->Internals->clientOnlyZeqManager->SignalUpdated();
 }
@@ -462,3 +424,58 @@ void pqZeqManagerPanel::onUpdateRenderViews(vtkSMSourceProxy *proxy)
   this->UpdateViews(proxy);
 }
 
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &s1, const QString &s2)
+{
+  int numValues;
+  std::vector<unsigned int> Ids;
+
+  //
+  servus::uint128_t t = e->Type;
+  zeq::Event new_event(t);
+  new_event.setData(zeq::ConstByteArray((uint8_t*)(e->buffer), boost::null_deleter()), e->size);
+  //
+  pqServerManagerModel *sm = pqApplicationCore::instance()->getServerManagerModel();
+  QList<pqPipelineSource*> pqsources = sm->findItems<pqPipelineSource*>(NULL);
+  vtkSMSourceProxy *proxy = NULL;
+  if (pqsources.size()>0) {
+    std::regex bbp("BlueConfig.*");
+    for (QList<pqPipelineSource*>::iterator it = pqsources.begin(); it != pqsources.end(); ++it) {
+      proxy = (*it)->getSourceProxy();
+      if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
+        //
+        vtkClientServerStream stream;
+        if (e->Type == zeq::hbp::EVENT_SELECTEDIDS) {
+          Ids = std::move(zeq::hbp::deserializeSelectedIDs( new_event ));
+          numValues = Ids.size();
+          emit doUpdateGUIMessage(QString("Calling ") + (numValues>0?s1:s2) + QString(" on ")
+            + (*it)->getSMName() + QString::number(numValues));
+          if (numValues>0) {
+            stream << vtkClientServerStream::Invoke
+              << VTKOBJECT(proxy)
+              << s1.toLatin1().data()
+              << static_cast<int>(numValues)
+              << stream.InsertArray((unsigned int*)(&Ids[0]), static_cast<int>(numValues));
+            stream << vtkClientServerStream::End;
+          }
+          else {
+            stream << vtkClientServerStream::Invoke
+              << VTKOBJECT(proxy)
+              << s2.toLatin1().data()
+              << vtkClientServerStream::End;
+          }
+        }
+        else if (e->Type == monsteer::streaming::EVENT_SPIKES) {
+        }
+        proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
+        (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
+        proxy->Modified();
+        proxy->MarkDirty(NULL);
+        emit doUpdateRenderViews(proxy);
+      }
+    }
+  }
+  else {
+    emit doUpdateGUIMessage("No BBP source proxy to set data on");
+  }
+}

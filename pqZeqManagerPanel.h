@@ -13,6 +13,17 @@ class pqView;
 class pqZeqManagerPanel : public pqNamedObjectPanel
 {
   Q_OBJECT
+  //
+  typedef struct zeq_event {
+    void             *buffer;
+    size_t            size;
+    servus::uint128_t Type;
+    ~zeq_event() {
+      delete []buffer;
+    }
+  } zeq_event;
+  //
+  typedef QSharedPointer<zeq_event> event_signal;
 
 public:
   /// constructor
@@ -31,8 +42,9 @@ public:
   void onSpike( const zeq::Event& event );
 
 signals:
-  void doUpdateGUIMessage(const QString &msg);
-  void doUpdateRenderViews(vtkSMSourceProxy *proxy);
+  void doUpdateGUIMessage(const QString &);
+  void doUpdateRenderViews(vtkSMSourceProxy *);
+  void doInvokeStream(event_signal, const QString &, const QString &);
 
 private slots:
   void onAccept();
@@ -41,6 +53,7 @@ private slots:
   void onNotified();
   void onUpdateGUIMessage(const QString &msg);
   void onUpdateRenderViews(vtkSMSourceProxy *proxy);
+  void onInvokeStream(event_signal, const QString &s1, const QString &s2);
 
 protected:
 
