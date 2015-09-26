@@ -32,13 +32,15 @@ public:
 
 signals:
   void doUpdateGUIMessage(const QString &msg);
+  void doUpdateRenderViews(vtkSMSourceProxy *proxy);
 
 private slots:
   void onAccept();
   void onStart();
   void onNewNotificationSocket();
   void onNotified();
-  void UpdateGUIMessage(const QString &msg);
+  void onUpdateGUIMessage(const QString &msg);
+  void onUpdateRenderViews(vtkSMSourceProxy *proxy);
 
 protected:
 

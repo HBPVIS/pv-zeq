@@ -143,7 +143,10 @@ pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
     VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT);
 
   QObject::connect(this, SIGNAL(doUpdateGUIMessage(const QString&)),
-    this, SLOT(UpdateGUIMessage(const QString&)));
+    this, SLOT(onUpdateGUIMessage(const QString&)));
+
+  QObject::connect(this, SIGNAL(doUpdateRenderViews(vtkSMSourceProxy *)),
+    this, SLOT(onUpdateRenderViews(vtkSMSourceProxy *)));
 }
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::~pqZeqManagerPanel()
@@ -328,7 +331,7 @@ void pqZeqManagerPanel::UpdateSelection(zeq::uint128_t Type, const void *buffer,
         (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
         proxy->Modified();
         proxy->MarkDirty(NULL);
-        this->UpdateViews(proxy);
+        emit doUpdateRenderViews(proxy);
       }
     }
   }
@@ -376,7 +379,7 @@ void pqZeqManagerPanel::UpdateViews(vtkSMSourceProxy *proxy)
   // Update all views which are associated with out pipelines
   //
   for (std::set<pqView*>::iterator it=viewlist.begin(); it!=viewlist.end(); ++it) {
-    (*it)->render();
+    (*it)->forceRender();
   }
 }
 
@@ -447,8 +450,15 @@ void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
 }
 
 //-----------------------------------------------------------------------------
-void pqZeqManagerPanel::UpdateGUIMessage(const QString &msg)
+void pqZeqManagerPanel::onUpdateGUIMessage(const QString &msg)
 {
   this->Internals->listModel << msg;
   this->Internals->eventview->scrollToBottom();
 }
+
+//-----------------------------------------------------------------------------
+void pqZeqManagerPanel::onUpdateRenderViews(vtkSMSourceProxy *proxy)
+{
+  this->UpdateViews(proxy);
+}
+
