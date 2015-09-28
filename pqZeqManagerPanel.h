@@ -44,7 +44,7 @@ public:
 signals:
   void doUpdateGUIMessage(const QString &);
   void doUpdateRenderViews(vtkSMSourceProxy *);
-  void doInvokeStream(event_signal, const QString &, const QString &);
+  void doInvokeStream(event_signal e, const QString &, const QString &, const QString &);
 
 private slots:
   void onAccept();
@@ -53,7 +53,7 @@ private slots:
   void onNotified();
   void onUpdateGUIMessage(const QString &msg);
   void onUpdateRenderViews(vtkSMSourceProxy *proxy);
-  void onInvokeStream(event_signal, const QString &s1, const QString &s2);
+  void onInvokeStream(event_signal e, const QString &, const QString &, const QString &);
 
 protected:
 

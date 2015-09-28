@@ -151,8 +151,8 @@ pqZeqManagerPanel::pqZeqManagerPanel(pqProxy* proxy, QWidget* p) :
     this, SLOT(onUpdateRenderViews(vtkSMSourceProxy *)));
 
   qRegisterMetaType<event_signal>("event_signal");
-  QObject::connect(this, SIGNAL(doInvokeStream(event_signal, const QString &, const QString &)),
-    this, SLOT(onInvokeStream(event_signal, const QString &, const QString &)));
+  QObject::connect(this, SIGNAL(doInvokeStream(event_signal, const QString &, const QString &, const QString &)),
+    this, SLOT(onInvokeStream(event_signal, const QString &, const QString &, const QString &)));
 }
 //----------------------------------------------------------------------------
 pqZeqManagerPanel::~pqZeqManagerPanel()
@@ -372,25 +372,18 @@ bool pqZeqManagerPanel::ClientSideZeqReady()
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onSpike( const zeq::Event& event )
 {
-  const monsteer::streaming::SpikeMap& spikes = monsteer::streaming::deserializeSpikes( event );
-
-  monsteer::streaming::SpikeMap _incoming;
-  _incoming.insert( spikes.begin(), spikes.end( ));
-
-  float _lastTimeStamp;
-
-  if ( !_incoming.empty() ) {
-      _lastTimeStamp = _incoming.rbegin()->first;
-  }
-
-  emit doUpdateGUIMessage("Received Spike data ");
-  //
-  this->Internals->clientOnlyZeqManager->SignalUpdated();
+  event_signal signal_data = event_signal(new zeq_event);
+  signal_data->buffer = new char[event.getSize()];
+  std::memcpy(signal_data->buffer, event.getData(), event.getSize());
+  signal_data->size   = event.getSize();
+  signal_data->Type   = event.getType();
+  emit doInvokeStream(signal_data, "NeuronSpike.*", "SetSpikeData", "ClearSpikeData");
 }
 
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onHBPCamera( const zeq::Event& event )
 {
+  // not currently implemented
   emit doUpdateGUIMessage("Received camera data ");
   //
   this->Internals->clientOnlyZeqManager->SignalUpdated();
@@ -404,11 +397,7 @@ void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
   std::memcpy(signal_data->buffer, event.getData(), event.getSize());
   signal_data->size   = event.getSize();
   signal_data->Type   = event.getType();
-  emit doInvokeStream(signal_data, "SetSelectedGIds", "ClearSelectedGIds");
-
-//  this->UpdateSelection(event.getType(), event.getData(), event.getSize());
-  //
-  this->Internals->clientOnlyZeqManager->SignalUpdated();
+  emit doInvokeStream(signal_data, "BlueConfig.*", "SetSelectedGIds", "ClearSelectedGIds");
 }
 
 //-----------------------------------------------------------------------------
@@ -425,11 +414,18 @@ void pqZeqManagerPanel::onUpdateRenderViews(vtkSMSourceProxy *proxy)
 }
 
 //-----------------------------------------------------------------------------
-void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &s1, const QString &s2)
+void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &regex, const QString &s1, const QString &s2)
 {
+  if (this->Internals->pause->isChecked()) {
+    emit doUpdateGUIMessage("Ignored an event (paused)");
+    // after message has been sent we can signal we are ready for the next
+    this->Internals->clientOnlyZeqManager->SignalUpdated();
+    return;
+  }
+  //
   int numValues;
   std::vector<unsigned int> Ids;
-
+  monsteer::streaming::SpikeMap Spikes;
   //
   servus::uint128_t t = e->Type;
   zeq::Event new_event(t);
@@ -439,7 +435,7 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &s1, const 
   QList<pqPipelineSource*> pqsources = sm->findItems<pqPipelineSource*>(NULL);
   vtkSMSourceProxy *proxy = NULL;
   if (pqsources.size()>0) {
-    std::regex bbp("BlueConfig.*");
+    std::regex bbp(regex.toLatin1().data());
     for (QList<pqPipelineSource*>::iterator it = pqsources.begin(); it != pqsources.end(); ++it) {
       proxy = (*it)->getSourceProxy();
       if (std::regex_match((*it)->getSMName().toLatin1().data(), bbp)) {
@@ -466,6 +462,38 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &s1, const 
           }
         }
         else if (e->Type == monsteer::streaming::EVENT_SPIKES) {
+          Spikes = std::move(monsteer::streaming::deserializeSpikes( new_event ));
+          numValues = Spikes.size();
+          typedef std::tuple<uint32_t, float> spike_tuple_type;
+          std::vector< spike_tuple_type > spikelist;
+          spikelist.reserve(numValues);
+          for (auto const &s : Spikes) {
+            spikelist.push_back( std::make_tuple(s.second, s.first) );
+            std::cout << "Tuple " << s.second << " " << s.first << "\n";
+          }
+          if (spikelist.size()!=numValues) {
+            emit doUpdateGUIMessage("Size mismatch");
+          }
+          float _lastTimeStamp;
+          if ( !Spikes.empty() ) {
+            _lastTimeStamp = Spikes.rbegin()->first;
+          }
+          emit doUpdateGUIMessage(QString("Calling ") + (numValues>0?s1:s2) + QString(" on ")
+            + (*it)->getSMName() + QString::number(numValues));
+          if (numValues>0) {
+            stream << vtkClientServerStream::Invoke
+              << VTKOBJECT(proxy)
+              << s1.toLatin1().data()
+              << static_cast<int>(numValues*sizeof(spike_tuple_type))
+              << stream.InsertArray((char*)(spikelist.data()), static_cast<int>(numValues*sizeof(spike_tuple_type)));
+            stream << vtkClientServerStream::End;
+          }
+          else {
+            stream << vtkClientServerStream::Invoke
+              << VTKOBJECT(proxy)
+              << s2.toLatin1().data()
+              << vtkClientServerStream::End;
+          }
         }
         proxy->GetSession()->ExecuteStream(proxy->GetLocation(), stream);
         (*it)->setModifiedState(pqProxy::ModifiedState::MODIFIED);
@@ -478,4 +506,6 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &s1, const 
   else {
     emit doUpdateGUIMessage("No BBP source proxy to set data on");
   }
+  // after message has been sent we can signal we are ready for the next
+  this->Internals->clientOnlyZeqManager->SignalUpdated();
 }
