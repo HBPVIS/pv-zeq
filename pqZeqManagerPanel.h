@@ -5,7 +5,10 @@
 
 #include "pqProxy.h"
 #include "pqNamedObjectPanel.h"
+#include "QTimer.h"
+#include "QMutex.h"
 #include "vtkZeqManager.h"
+#include <monsteer/streaming/vocabulary.h>
 
 class vtkSMSourceProxy;
 class pqView;
@@ -49,11 +52,14 @@ signals:
 private slots:
   void onAccept();
   void onStart();
+  void onPause();
+  //
   void onNewNotificationSocket();
   void onNotified();
   void onUpdateGUIMessage(const QString &msg);
   void onUpdateRenderViews(vtkSMSourceProxy *proxy);
   void onInvokeStream(event_signal e, const QString &, const QString &, const QString &);
+  void onTimerUpdate();
 
 protected:
 
@@ -66,6 +72,10 @@ protected:
 
   class pqInternals;
   pqInternals* Internals;
+  QTimer zeq_timer;
+  QMutex zeq_mutex;
+
+  monsteer::streaming::SpikeMap Spikes;
 
 protected slots:
 
