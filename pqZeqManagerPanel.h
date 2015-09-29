@@ -5,8 +5,8 @@
 
 #include "pqProxy.h"
 #include "pqNamedObjectPanel.h"
-#include "QTimer.h"
-#include "QMutex.h"
+#include <QTimer>
+#include <QMutex>
 #include "vtkZeqManager.h"
 #include <monsteer/streaming/vocabulary.h>
 
