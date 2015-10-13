@@ -532,6 +532,7 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &regex, con
   }
   else {
     emit doUpdateGUIMessage("No BBP source proxy to set data on");
+    signal = true;
   }
   // after message has been sent we can signal we are ready for the next
   if (signal) this->Internals->clientOnlyZeqManager->SignalUpdated();
