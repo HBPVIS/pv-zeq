@@ -235,7 +235,9 @@ void pqZeqManagerDockWindow::serverAdded(pqServer *server)
 {
   this->init();
   this->accept();
-  this->UI->ZeqManagerPanel->AutoStart();
+  if (this->UI->ZeqManagerPanel) {
+    this->UI->ZeqManagerPanel->AutoStart();
+  }
 }
 //----------------------------------------------------------------------------
 void pqZeqManagerDockWindow::StartRemovingServer(pqServer *server)

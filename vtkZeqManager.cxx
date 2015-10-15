@@ -25,6 +25,7 @@
 //
 #include "vtkProcessModule.h"
 #include "vtkPVOptions.h"
+#include "vtkPVServerOptions.h"
 #include "vtkClientSocket.h"
 #include "vtkMultiThreader.h"
 #include "vtkMutexLock.h"
@@ -214,6 +215,7 @@ void vtkZeqManager::onHBPCamera( const zeq::Event& event )
 void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 {
   // forward the event directly to the client
+  std::cout << "Forwarding selection " << event.getSize() << "\n";
   event_data data = {event.getType(), event.getSize() };
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
   this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
@@ -223,24 +225,10 @@ void vtkZeqManager::onSelectedIds( const zeq::Event& event )
 void vtkZeqManager::onSpike( const zeq::Event& event )
 {
   // forward the event directly to the client
+  std::cout << "Forwarding spikes " << event.getSize() << "\n";
   event_data data = {event.getType(), event.getSize() };
   this->ZeqManagerInternals->NotificationSocket->Send(&data, sizeof(event_data));
   this->ZeqManagerInternals->NotificationSocket->Send(event.getData(), event.getSize());
-
-/*
-    const monsteer::streaming::SpikeMap& spikes = monsteer::streaming::deserializeSpikes( event );
-
-    monsteer::streaming::SpikeMap _incoming;
-    _incoming.insert( spikes.begin(), spikes.end( ));
-
-    float _lastTimeStamp;
-
-    if( !_incoming.empty() )
-        _lastTimeStamp = _incoming.rbegin()->first;
-*/
-
-//
-//  event_data data = {event.getType(), Ids.size() };
 }
 
 //---------------------------------------------------------------------------
@@ -319,7 +307,14 @@ int vtkZeqManager::CreateNotificationSocket()
 {
   vtkProcessModule* pm = vtkProcessModule::GetProcessModule();
   vtkPVOptions *pvOptions = pm->GetOptions();
-  const char *pvClientHostName = pvOptions->GetHostName();
+  vtkPVServerOptions* options = vtkPVServerOptions::SafeDownCast(pvOptions);
+  const char *pvClientHostName = NULL;
+  if (options) {
+    pvClientHostName = options->GetClientHostName();
+  }
+  else {
+    pvClientHostName = pvOptions->GetHostName();
+  }
   int notificationPort = VTK_ZEQ_MANAGER_DEFAULT_NOTIFICATION_PORT;
   if ((this->UpdatePiece == 0) && pvClientHostName && pvClientHostName[0]) {
     int r, tryConnect = 0;

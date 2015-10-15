@@ -86,6 +86,9 @@ public:
     append(string);
     return *this;
   }
+  void clear() {
+    removeRows(0,rowCount()-1);
+  }
 };
 
 //----------------------------------------------------------------------------
@@ -197,7 +200,7 @@ void pqZeqManagerPanel::SaveSettings()
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::AutoStart()
 {
-  if (this->Internals->autostart->isChecked()) {
+  if (this->Internals && this->Internals->autostart->isChecked()) {
     this->onStart();
   }
 }
@@ -246,9 +249,6 @@ void pqZeqManagerPanel::onPause()
 }
 //-----------------------------------------------------------------------------
 //
-// @TODO, clean this up so that the message from zeq is forwarded directly
-// to the GUI and then deserialized once in the relevant function
-//
 void pqZeqManagerPanel::onNotified()
 {
   int error = 0;
@@ -258,7 +258,9 @@ void pqZeqManagerPanel::onNotified()
   //
   vtkZeqManager::event_data event_data;
   //
+  std::cout << "Notification " << this->Internals->event_num << "\n";
   while (this->Internals->TcpNotificationSocket->size() > 0) {
+    std::cout << "Loop " << this->Internals->event_num << "\n";
 
     //
     std::stringstream temp;
@@ -270,8 +272,19 @@ void pqZeqManagerPanel::onNotified()
     if (bytes_read != sizeof(vtkZeqManager::event_data)) {
       error = 1;
       temp << "Error in data header size";
+      std::cout << "error in header " << temp.str().c_str() << "\n";
       break;
     }
+
+    std::cout << "event size " << event_data.Size << "\n";
+
+    // new connection events are zero size, so handle them specially
+    if (event_data.Type == new_connection) {
+      this->Internals->eventview->setModel(&this->Internals->listModel);
+      emit doUpdateGUIMessage(QString(temp.str().c_str()) + "New Zeq connection");
+      continue;
+    }
+
 
     // read data block
     std::vector<char> buffer;
@@ -281,16 +294,12 @@ void pqZeqManagerPanel::onNotified()
                    reinterpret_cast<char*>(&buffer[0]), event_data.Size);
     if (bytes_read!=event_data.Size) {
       temp << "Error in data block size";
+      emit doUpdateGUIMessage(QString(temp.str().c_str()));
       continue;
     }
 
-    // process the event
-    if (event_data.Type == new_connection) {
-      this->Internals->eventview->setModel(&this->Internals->listModel);
-      emit doUpdateGUIMessage(QString(temp.str().c_str()) + "New Zeq connection");
-    }
     // if (this->Internals->DsmProxyCreated() && this->Internals->DsmInitialized) {
-    else if (event_data.Type == zeq::hbp::EVENT_CAMERA) {
+    if (event_data.Type == zeq::hbp::EVENT_CAMERA) {
       emit doUpdateGUIMessage(QString(temp.str().c_str()) + "CameraEvent");
       this->UpdateCamera(event_data.Type, buffer.data(), buffer.size());
     }
@@ -309,11 +318,12 @@ void pqZeqManagerPanel::onNotified()
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::UpdateSelection(zeq::uint128_t Type, const void *buffer, size_t size)
 {
-  zeq::Event event(Type);
-  event.setData(zeq::ConstByteArray((uint8_t*)(buffer), boost::null_deleter()), size);
-  //std::cout << "Got a Selected Ids event " << event.getType() << std::endl;
-  std::vector<unsigned int> Ids = zeq::hbp::deserializeSelectedIDs( event );
-  //
+  event_signal signal_data = event_signal(new zeq_event);
+  signal_data->buffer = new char[size];
+  std::memcpy(signal_data->buffer, buffer, size);
+  signal_data->size   = size;
+  signal_data->Type   = Type;
+  emit doInvokeStream(signal_data, "BlueConfig.*", "SetSelectedGIds", "ClearSelectedGIds");
 }
 
 //-----------------------------------------------------------------------------
@@ -325,7 +335,24 @@ void pqZeqManagerPanel::UpdateCamera(zeq::uint128_t Type, const void *buffer, si
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::UpdateSpikes(zeq::uint128_t Type, const void *buffer, size_t size)
 {
-  emit doUpdateGUIMessage("Setting spikes");
+  zeq::Event event(Type);
+  event.setData(zeq::ConstByteArray((uint8_t*)(buffer), boost::null_deleter()), size);
+  //
+  if (!this->Internals->pause->isChecked()) {
+    size_t N;
+    {
+      QMutexLocker lock(&zeq_mutex);
+      monsteer::streaming::SpikeMap LocalSpikes;
+      LocalSpikes = monsteer::streaming::deserializeSpikes( event );
+      Spikes.insert(LocalSpikes.begin(), LocalSpikes.end());
+      N = LocalSpikes.size();
+      emit doUpdateGUIMessage("Locally buffered " + QString::number(N) + " spikes");
+    }
+  }
+  else {
+    emit doUpdateGUIMessage("Skipped spike message (paused)");
+  }
+  this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
 }
 
 //-----------------------------------------------------------------------------
@@ -431,8 +458,14 @@ void pqZeqManagerPanel::onSelectedIds( const zeq::Event& event )
 //-----------------------------------------------------------------------------
 void pqZeqManagerPanel::onUpdateGUIMessage(const QString &msg)
 {
+  static int counter = 0;
+  if (counter>100) {
+    this->Internals->listModel.clear();
+    counter = 0;
+  }
   this->Internals->listModel << msg;
   this->Internals->eventview->scrollToBottom();
+  counter ++;
 }
 
 //-----------------------------------------------------------------------------
@@ -499,7 +532,7 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &regex, con
           spikelist.reserve(numValues);
           for (auto const &s : Spikes) {
             spikelist.push_back( std::make_tuple(s.second, s.first) );
-            std::cout << s.first << ", ";
+//            std::cout << s.first << ", ";
           }
           float _lastTimeStamp;
           if ( !Spikes.empty() ) {
@@ -534,8 +567,14 @@ void pqZeqManagerPanel::onInvokeStream(event_signal e, const QString &regex, con
     emit doUpdateGUIMessage("No BBP source proxy to set data on");
     signal = true;
   }
-  // after message has been sent we can signal we are ready for the next
-  if (signal) this->Internals->clientOnlyZeqManager->SignalUpdated();
+  if (this->Internals->clientOnlyZeqManager) {
+    // after message has been sent we can signal we are ready for the next
+    if (signal) this->Internals->clientOnlyZeqManager->SignalUpdated();
+  }
+  else {
+    // signal back to the server that we have done with this event and it can proceed with the next
+    this->referenceProxy()->getProxy()->InvokeCommand("SignalUpdated");
+  }
 }
 
 //-----------------------------------------------------------------------------

@@ -18,7 +18,7 @@ class pqZeqManagerPanel : public pqNamedObjectPanel
   Q_OBJECT
   //
   typedef struct zeq_event {
-    void             *buffer;
+    char             *buffer;
     size_t            size;
     servus::uint128_t Type;
     ~zeq_event() {
